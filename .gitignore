@@ -1,0 +1,6 @@
+config.sh
+logs/
+backups/
+ssl-certificates/
+mariadb/
+*.log
