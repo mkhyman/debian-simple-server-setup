@@ -15,13 +15,16 @@ echo
 [[ "${db_name}" =~ ^[a-zA-Z0-9_]+$ ]] || fail "Invalid database name."
 [[ "${db_user}" =~ ^[a-zA-Z0-9_]+$ ]] || fail "Invalid database username."
 
-mysql <<SQL
+if ! mysql <<SQL
 CREATE DATABASE IF NOT EXISTS \`${db_name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${db_user}'@'${db_host}' IDENTIFIED BY '${db_pass}' REQUIRE SSL;
 ALTER USER '${db_user}'@'${db_host}' IDENTIFIED BY '${db_pass}' REQUIRE SSL;
 GRANT ALL PRIVILEGES ON \`${db_name}\`.* TO '${db_user}'@'${db_host}';
 FLUSH PRIVILEGES;
 SQL
+then
+    fail "MariaDB user/database creation failed. The database or user may be partially created; check MariaDB before rerunning."
+fi
 
 ok "MariaDB database/user created."
 info "User requires SSL: '${db_user}'@'${db_host}'"

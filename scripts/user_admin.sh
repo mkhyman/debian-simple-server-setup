@@ -17,18 +17,18 @@ if linux_user_exists "${admin_user}"; then
 else
     warn "Admin user does not currently exist: ${admin_user}"
     confirm "Create this admin user?" || exit 0
-    ensure_linux_user "${admin_user}" || fail "Could not create user ${admin_user}."
+    ensure_linux_user "${admin_user}" || fail "Could not create admin user ${admin_user}. No sudo or SSH changes were applied for this user."
 fi
 
-ensure_user_in_sudo "${admin_user}" || fail "Could not add ${admin_user} to sudo."
-ensure_user_in_group "${admin_user}" "${SERVER_ADMIN_GROUP}" || fail "Could not add ${admin_user} to ${SERVER_ADMIN_GROUP}."
+ensure_user_in_sudo "${admin_user}" || fail "Could not add ${admin_user} to sudo. SSH access was not changed by this script."
+ensure_user_in_group "${admin_user}" "${SERVER_ADMIN_GROUP}" || fail "Could not add ${admin_user} to ${SERVER_ADMIN_GROUP}. Toolkit file access may not work for this user."
 
 if confirm "Set or update local password for ${admin_user}?"; then
-    passwd "${admin_user}"
+    passwd "${admin_user}" || fail "Password update failed for ${admin_user}. Continuing would leave the account in an unknown login state."
 fi
 
 if confirm "Ensure SSH AllowUsers includes ${admin_user}?"; then
-    ensure_sshd_allow_user "${admin_user}" || fail "Could not update SSH AllowUsers for ${admin_user}."
+    ensure_sshd_allow_user "${admin_user}" || fail "Could not update SSH AllowUsers for ${admin_user}. SSH was not reloaded unless config validation succeeded."
 fi
 
 ok "Admin user is prepared: ${admin_user}"

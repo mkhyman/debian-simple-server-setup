@@ -25,14 +25,14 @@ if linux_user_exists "${site_user}"; then
 else
     warn "Website user does not currently exist: ${site_user}"
     confirm "Create this website user?" || exit 0
-    ensure_linux_user "${site_user}" || fail "Could not create user ${site_user}."
+    ensure_linux_user "${site_user}" || fail "Could not create website user ${site_user}. Website directories were not created."
 fi
 
 read -rp "Laravel site directories? [Y/n]: " is_laravel
 is_laravel="${is_laravel:-Y}"
 
-ensure_website_directories "${site_user}" "${is_laravel}" || fail "Could not create website directories."
-ensure_website_acls "${site_user}" "${is_laravel}" || fail "Could not apply website ACLs."
+ensure_website_directories "${site_user}" "${is_laravel}" || fail "Could not create website directories for ${site_user}. ACLs and optional tooling were not applied."
+ensure_website_acls "${site_user}" "${is_laravel}" || fail "Could not apply website ACLs for ${site_user}. Apache may not be able to read the site until permissions are fixed."
 
 home_dir="$(site_home_for_user "${site_user}")"
 
@@ -40,13 +40,13 @@ if [[ -s "${home_dir}/.nvm/nvm.sh" ]]; then
     info "NVM already installed for ${site_user}."
 else
     if confirm "Install nvm for ${site_user}?"; then
-        run su - "${site_user}" -c 'export PROFILE="$HOME/.bashrc"; curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash' || fail "NVM install failed."
+        run su - "${site_user}" -c 'export PROFILE="$HOME/.bashrc"; curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash' || fail "NVM install failed for ${site_user}. Website user/directories remain in place; rerun this script to retry Node setup."
     fi
 fi
 
 read -rp "Node version to install for ${site_user}, e.g. --lts, 20, 22, or blank to skip: " node_version
 if [[ -n "${node_version}" ]]; then
-    run su - "${site_user}" -c "export NVM_DIR=\"\$HOME/.nvm\"; [ -s \"\$NVM_DIR/nvm.sh\" ] && . \"\$NVM_DIR/nvm.sh\"; nvm install ${node_version}; nvm alias default ${node_version}" || fail "Node install failed."
+    run su - "${site_user}" -c "export NVM_DIR=\"\$HOME/.nvm\"; [ -s \"\$NVM_DIR/nvm.sh\" ] && . \"\$NVM_DIR/nvm.sh\"; nvm install ${node_version}; nvm alias default ${node_version}" || fail "Node install failed for ${site_user}. Website user/directories remain in place; rerun this script to retry Node setup."
 fi
 
 ok "Website user prepared: ${site_user}"

@@ -20,48 +20,51 @@ export DEBIAN_FRONTEND=noninteractive
 
 info "Installing base packages."
 info "software-properties-common is deliberately not installed because it is unnecessary for this Debian setup."
-run apt-get update || fail "apt-get update failed."
+run apt-get update || fail "apt-get update failed. Package installation was not attempted. Check network, DNS and APT source configuration."
 run apt-get install -y \
     apt-transport-https ca-certificates curl wget gnupg gpg lsb-release sudo \
     unzip zip git nano vim htop rsync acl openssl ufw fail2ban \
-    unattended-upgrades apt-listchanges || fail "Base package installation failed."
+    unattended-upgrades apt-listchanges || fail "Base package installation failed. Base system was not marked complete; rerun after checking the APT log output."
 
 info "Setting timezone to ${TIMEZONE}."
-run timedatectl set-timezone "${TIMEZONE}" || fail "Could not set timezone."
+run timedatectl set-timezone "${TIMEZONE}" || fail "Could not set timezone to ${TIMEZONE}. Check TIMEZONE in config.sh."
 
 info "Ensuring server admin group exists: ${SERVER_ADMIN_GROUP}."
 if getent group "${SERVER_ADMIN_GROUP}" >/dev/null 2>&1; then
     info "Group ${SERVER_ADMIN_GROUP} already exists."
 else
-    run groupadd --system "${SERVER_ADMIN_GROUP}" || fail "Could not create ${SERVER_ADMIN_GROUP} group."
+    run groupadd --system "${SERVER_ADMIN_GROUP}" || fail "Could not create server admin group: ${SERVER_ADMIN_GROUP}. No permissions were changed."
 fi
 
 info "Ensuring runtime directories exist."
-install -d -o root -g "${SERVER_ADMIN_GROUP}" -m 2770 "${SERVER_ADMIN_DIR}"
-install -d -o root -g "${SERVER_ADMIN_GROUP}" -m 2770 "${SERVER_ADMIN_LOG_DIR}"
-install -d -o root -g "${SERVER_ADMIN_GROUP}" -m 2770 "${SERVER_ADMIN_BACKUP_DIR}"
-install -d -o root -g "${SERVER_ADMIN_GROUP}" -m 2770 "${SERVER_ADMIN_DOCS_DIR}"
-install -d -o root -g "${SERVER_ADMIN_GROUP}" -m 2770 "${SERVER_ADMIN_MARIADB_DIR}"
-install -d -o root -g "${SERVER_ADMIN_GROUP}" -m 2770 "${SERVER_ADMIN_STATE_DIR}"
+install -d -o root -g "${SERVER_ADMIN_GROUP}" -m 2770 "${SERVER_ADMIN_DIR}"     || fail "Could not create ${SERVER_ADMIN_DIR}. Later scripts were not run."
+install -d -o root -g "${SERVER_ADMIN_GROUP}" -m 2770 "${SERVER_ADMIN_LOG_DIR}"     || fail "Could not create log directory: ${SERVER_ADMIN_LOG_DIR}."
+install -d -o root -g "${SERVER_ADMIN_GROUP}" -m 2770 "${SERVER_ADMIN_BACKUP_DIR}"     || fail "Could not create backup directory: ${SERVER_ADMIN_BACKUP_DIR}."
+install -d -o root -g "${SERVER_ADMIN_GROUP}" -m 2770 "${SERVER_ADMIN_DOCS_DIR}"     || fail "Could not create docs directory: ${SERVER_ADMIN_DOCS_DIR}."
+install -d -o root -g "${SERVER_ADMIN_GROUP}" -m 2770 "${SERVER_ADMIN_MARIADB_DIR}"     || fail "Could not create MariaDB admin directory: ${SERVER_ADMIN_MARIADB_DIR}."
+install -d -o root -g "${SERVER_ADMIN_GROUP}" -m 2770 "${SERVER_ADMIN_STATE_DIR}"     || fail "Could not create state directory: ${SERVER_ADMIN_STATE_DIR}."
 
 # Website private keys live here, so this directory is intentionally root-only.
-install -d -o root -g root -m 700 "${SERVER_ADMIN_SSL_DIR}"
+install -d -o root -g root -m 700 "${SERVER_ADMIN_SSL_DIR}"     || fail "Could not create SSL certificate directory: ${SERVER_ADMIN_SSL_DIR}."
 
 info "Hardening toolkit repository permissions."
 find "${SERVER_ADMIN_DIR}" \
     -path "${SERVER_ADMIN_DIR}/.git" -prune -o \
     -path "${SERVER_ADMIN_SSL_DIR}" -prune -o \
-    -type d -exec chgrp "${SERVER_ADMIN_GROUP}" {} + -exec chmod 2770 {} +
+    -type d -exec chgrp "${SERVER_ADMIN_GROUP}" {} + -exec chmod 2770 {} + \
+    || fail "Could not harden toolkit directory permissions. Some directories may be partially updated."
 
 find "${SERVER_ADMIN_DIR}" \
     -path "${SERVER_ADMIN_DIR}/.git" -prune -o \
     -path "${SERVER_ADMIN_SSL_DIR}" -prune -o \
-    -type f -name "*.sh" -exec chgrp "${SERVER_ADMIN_GROUP}" {} + -exec chmod 770 {} +
+    -type f -name "*.sh" -exec chgrp "${SERVER_ADMIN_GROUP}" {} + -exec chmod 770 {} + \
+    || fail "Could not harden toolkit script permissions. Some files may be partially updated."
 
 find "${SERVER_ADMIN_DIR}" \
     -path "${SERVER_ADMIN_DIR}/.git" -prune -o \
     -path "${SERVER_ADMIN_SSL_DIR}" -prune -o \
-    -type f ! -name "*.sh" -exec chgrp "${SERVER_ADMIN_GROUP}" {} + -exec chmod 660 {} +
+    -type f ! -name "*.sh" -exec chgrp "${SERVER_ADMIN_GROUP}" {} + -exec chmod 660 {} + \
+    || fail "Could not harden toolkit non-script permissions. Some files may be partially updated."
 
 # SSH is the first exposed service on a new host, so fail2ban is configured in
 # the base layer rather than waiting for the web stack.
@@ -84,8 +87,8 @@ write_managed_file /etc/fail2ban/jail.d/sshd.local 0644 root:root "${tmp_fail2ba
 
 # Restart after writing the managed jail so reruns converge on the desired
 # runtime state instead of merely changing files on disk.
-service_enable_now fail2ban || fail "Could not enable fail2ban."
-service_restart fail2ban || fail "Could not restart fail2ban."
+service_enable_now fail2ban || fail "Could not enable fail2ban. SSH jail config was written, but the service was not started."
+service_restart fail2ban || fail "Could not restart fail2ban after writing SSH jail config. Check the fail2ban log and generated jail file."
 
 # Security updates are deliberately narrow and opt-in via config because this is
 # a personal hosting box, not an unattended general package-upgrade system.
@@ -117,11 +120,11 @@ EOF
     write_managed_file /etc/apt/apt.conf.d/51security-only-unattended-upgrades 0644 root:root "${tmp_security_upgrades}" \
         || fail "Could not write unattended-upgrades security-only config."
 
-    service_enable_now unattended-upgrades || fail "Could not enable unattended-upgrades."
+    service_enable_now unattended-upgrades || fail "Could not enable unattended-upgrades. Config files were written but the service state was not changed."
 else
     info "Unattended security updates disabled by config."
 fi
 
-write_base_system_complete_marker || fail "Could not write base system completion marker."
+write_base_system_complete_marker || fail "Could not write base system completion marker. Later scripts will still refuse to run until this succeeds."
 
 ok "Base system setup complete."

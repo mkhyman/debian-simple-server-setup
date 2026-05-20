@@ -7,18 +7,18 @@ require_base_system_complete
 
 info "Configuring UFW firewall without resetting existing rules."
 
-run apt-get update || fail "apt-get update failed."
-run apt-get install -y ufw || fail "Could not install ufw."
+run apt-get update || fail "apt-get update failed. Firewall configuration was not changed."
+run apt-get install -y ufw || fail "Could not install ufw. Firewall configuration was not changed."
 
-run ufw default deny incoming || fail "Could not set incoming firewall default."
-run ufw default allow outgoing || fail "Could not set outgoing firewall default."
+run ufw default deny incoming || fail "Could not set UFW incoming default policy. UFW was not enabled by this script."
+run ufw default allow outgoing || fail "Could not set UFW outgoing default policy. UFW was not enabled by this script."
 
-run ufw allow "${SSH_PORT}/tcp" comment "SSH" || fail "Could not allow SSH."
-run ufw allow 80/tcp comment "HTTP redirect to HTTPS" || fail "Could not allow HTTP."
-run ufw allow 443/tcp comment "HTTPS" || fail "Could not allow HTTPS."
-run ufw allow "${MARIADB_PORT}/tcp" comment "MariaDB SSL" || fail "Could not allow MariaDB."
+run ufw allow "${SSH_PORT}/tcp" comment "SSH" || fail "Could not add SSH allow rule for port ${SSH_PORT}. UFW was not enabled by this script."
+run ufw allow 80/tcp comment "HTTP redirect to HTTPS" || fail "Could not add HTTP allow rule. UFW was not enabled by this script."
+run ufw allow 443/tcp comment "HTTPS" || fail "Could not add HTTPS allow rule. UFW was not enabled by this script."
+run ufw allow "${MARIADB_PORT}/tcp" comment "MariaDB SSL" || fail "Could not add MariaDB allow rule for port ${MARIADB_PORT}. UFW was not enabled by this script."
 
-run ufw --force enable || fail "Could not enable UFW."
+run ufw --force enable || fail "Could not enable UFW. Rules may have been added, but the firewall activation failed."
 
 ufw status verbose >>"${LOG_FILE}" 2>&1 || true
 ok "Firewall configured."

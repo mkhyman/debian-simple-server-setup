@@ -32,7 +32,7 @@ read -rp "Extra hostnames / ServerAlias, space-separated or blank: " server_alia
 
 read -rp "PHP version [${DEFAULT_PHP_VERSION}]: " php_version
 php_version="${php_version:-${DEFAULT_PHP_VERSION}}"
-require_php_fpm_version "${php_version}" || fail "PHP-FPM ${php_version} is not installed."
+require_php_fpm_version "${php_version}" || fail "PHP-FPM ${php_version} is not installed. No vhost or pool files were written."
 
 echo
 echo "SSL certificate options:"
@@ -51,7 +51,7 @@ default_cert_folder="${hostname#*.}"
 read -rp "Certificate folder/domain [${default_cert_folder}]: " cert_folder
 cert_folder="${cert_folder:-${default_cert_folder}}"
 
-require_certificate_files "${cert_folder}" || fail "Missing certificate files for ${cert_folder}."
+require_certificate_files "${cert_folder}" || fail "Missing certificate files for ${cert_folder}. No vhost or pool files were written."
 
 cert_dir="$(certificate_dir_for_name "${cert_folder}")"
 fullchain="${cert_dir}/fullchain.pem"
@@ -97,7 +97,7 @@ php_admin_flag[log_errors] = on
 catch_workers_output = yes
 EOF
 
-write_managed_file "${pool_file}" 0644 root:root "${tmp_pool}" || fail "Could not write PHP-FPM pool."
+write_managed_file "${pool_file}" 0644 root:root "${tmp_pool}" || fail "Could not write PHP-FPM pool. Apache vhosts were not enabled."
 
 server_alias_line=""
 if [[ -n "${server_aliases}" ]]; then
@@ -163,14 +163,14 @@ ${server_alias_line}
 </IfModule>
 EOF
 
-write_managed_file "${http_vhost}" 0644 root:root "${tmp_http}" || fail "Could not write HTTP vhost."
-write_managed_file "${https_vhost}" 0644 root:root "${tmp_https}" || fail "Could not write HTTPS vhost."
+write_managed_file "${http_vhost}" 0644 root:root "${tmp_http}" || fail "Could not write HTTP vhost. Site was not enabled."
+write_managed_file "${https_vhost}" 0644 root:root "${tmp_https}" || fail "Could not write HTTPS vhost. Site was not enabled."
 
-run a2ensite "${hostname}.conf" || fail "Could not enable HTTP vhost."
-run a2ensite "${hostname}-ssl.conf" || fail "Could not enable HTTPS vhost."
+run a2ensite "${hostname}.conf" || fail "Could not enable HTTP vhost for ${hostname}. Apache was not reloaded."
+run a2ensite "${hostname}-ssl.conf" || fail "Could not enable HTTPS vhost for ${hostname}. Apache was not reloaded."
 # PHP-FPM is restarted first so Apache never points at a pool configuration that
 # has not been accepted by the PHP-FPM daemon.
-restart_php_fpm_safely "${php_version}" || fail "Could not validate and restart PHP-FPM ${php_version}."
-reload_apache_safely || fail "Could not validate and reload Apache."
+restart_php_fpm_safely "${php_version}" || fail "PHP-FPM ${php_version} validation or restart failed. Apache was not reloaded."
+reload_apache_safely || fail "Apache config validation or reload failed. The vhost files may be written/enabled, but Apache kept its previous running config."
 
 ok "HTTPS site created for ${hostname}."

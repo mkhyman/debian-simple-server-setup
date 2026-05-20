@@ -85,7 +85,7 @@ if [[ ! "${treat_as_fullchain}" =~ ^[Yy]$ ]]; then
     if [[ "${has_chain_zip}" =~ ^[Yy]$ ]]; then
         chain_zip_src="$(choose_file_from_input_dir "Intermediate ZIP filename" "${input_dir}" "yes")"
         temp_extract_dir="$(mktemp -d)"
-        run unzip -o "${chain_zip_src}" -d "${temp_extract_dir}" || fail "Could not unzip intermediate bundle."
+        run unzip -o "${chain_zip_src}" -d "${temp_extract_dir}" || fail "Could not unzip intermediate bundle. No certificate files were imported."
 
         info "Certificate-like files found inside ZIP:"
         find "${temp_extract_dir}" -type f \( -iname '*.cer' -o -iname '*.crt' -o -iname '*.pem' \) -printf '  %P\n' | sort | tee -a "${LOG_FILE}"
@@ -117,8 +117,8 @@ if [[ ! "${treat_as_fullchain}" =~ ^[Yy]$ ]]; then
 fi
 
 dest_dir="$(certificate_dir_for_name "${cert_folder}")"
-install -d -m 700 -o root -g root "${SERVER_ADMIN_SSL_DIR}"
-install -d -m 700 -o root -g root "${dest_dir}"
+install -d -m 700 -o root -g root "${SERVER_ADMIN_SSL_DIR}" || fail "Could not create SSL certificate base directory: ${SERVER_ADMIN_SSL_DIR}."
+install -d -m 700 -o root -g root "${dest_dir}" || fail "Could not create destination certificate directory: ${dest_dir}."
 
 cert_dst="${dest_dir}/cert.pem"
 key_dst="${dest_dir}/privkey.pem"
@@ -126,46 +126,48 @@ chain_dst="${dest_dir}/chain.pem"
 fullchain_dst="${dest_dir}/fullchain.pem"
 source_notes="${dest_dir}/source-files.txt"
 
-backup_file "${cert_dst}" || fail "Could not back up cert.pem."
-backup_file "${key_dst}" || fail "Could not back up privkey.pem."
-backup_file "${chain_dst}" || fail "Could not back up chain.pem."
-backup_file "${fullchain_dst}" || fail "Could not back up fullchain.pem."
-backup_file "${source_notes}" || fail "Could not back up source-files.txt."
+backup_file "${cert_dst}" || fail "Could not back up cert.pem. Certificate import stopped before overwriting files."
+backup_file "${key_dst}" || fail "Could not back up privkey.pem. Certificate import stopped before overwriting files."
+backup_file "${chain_dst}" || fail "Could not back up chain.pem. Certificate import stopped before overwriting files."
+backup_file "${fullchain_dst}" || fail "Could not back up fullchain.pem. Certificate import stopped before overwriting files."
+backup_file "${source_notes}" || fail "Could not back up source-files.txt. Certificate import stopped before overwriting files."
 
-cp -a "${private_key_src}" "${key_dst}"
+cp -a "${private_key_src}" "${key_dst}" || fail "Could not copy private key into ${key_dst}. Certificate import is incomplete."
 
 if [[ "${treat_as_fullchain}" =~ ^[Yy]$ ]]; then
-    cp -a "${leaf_cert_src}" "${fullchain_dst}"
-    awk '/-----BEGIN CERTIFICATE-----/ { n++ } n == 1 { print } /-----END CERTIFICATE-----/ && n == 1 { exit }' "${leaf_cert_src}" > "${cert_dst}"
-    awk '/-----BEGIN CERTIFICATE-----/ { n++ } n >= 2 { print }' "${leaf_cert_src}" > "${chain_dst}"
-    [[ -s "${chain_dst}" ]] || rm -f "${chain_dst}"
+    cp -a "${leaf_cert_src}" "${fullchain_dst}" || fail "Could not copy supplied fullchain into ${fullchain_dst}. Certificate import is incomplete."
+    awk '/-----BEGIN CERTIFICATE-----/ { n++ } n == 1 { print } /-----END CERTIFICATE-----/ && n == 1 { exit }' "${leaf_cert_src}" > "${cert_dst}" \
+        || fail "Could not extract leaf certificate from supplied fullchain. Certificate import is incomplete."
+    awk '/-----BEGIN CERTIFICATE-----/ { n++ } n >= 2 { print }' "${leaf_cert_src}" > "${chain_dst}" \
+        || fail "Could not extract certificate chain from supplied fullchain. Certificate import is incomplete."
+    [[ -s "${chain_dst}" ]] || rm -f "${chain_dst}" || fail "Could not remove empty chain file: ${chain_dst}."
 else
-    cp -a "${leaf_cert_src}" "${cert_dst}"
-    : > "${chain_dst}"
+    cp -a "${leaf_cert_src}" "${cert_dst}" || fail "Could not copy leaf certificate into ${cert_dst}. Certificate import is incomplete."
+    : > "${chain_dst}" || fail "Could not initialise chain file: ${chain_dst}. Certificate import is incomplete."
     for chain_file in "${chain_files[@]}"; do
-        cat "${chain_file}" >> "${chain_dst}"
+        cat "${chain_file}" >> "${chain_dst}" || fail "Could not append intermediate certificate: ${chain_file}. Certificate import is incomplete."
         printf '\n' >> "${chain_dst}"
     done
 
     if [[ -s "${chain_dst}" ]]; then
-        cat "${cert_dst}" "${chain_dst}" > "${fullchain_dst}"
+        cat "${cert_dst}" "${chain_dst}" > "${fullchain_dst}" || fail "Could not build fullchain.pem. Certificate import is incomplete."
     else
-        cp -a "${cert_dst}" "${fullchain_dst}"
+        cp -a "${cert_dst}" "${fullchain_dst}" || fail "Could not create fullchain.pem from cert.pem. Certificate import is incomplete."
     fi
 fi
 
-chown root:root "${dest_dir}"/*
-chmod 600 "${key_dst}"
-chmod 644 "${cert_dst}" "${fullchain_dst}"
-[[ -f "${chain_dst}" ]] && chmod 644 "${chain_dst}"
+chown root:root "${dest_dir}"/* || fail "Could not set certificate file ownership in ${dest_dir}."
+chmod 600 "${key_dst}" || fail "Could not secure private key permissions: ${key_dst}."
+chmod 644 "${cert_dst}" "${fullchain_dst}" || fail "Could not set certificate file permissions in ${dest_dir}."
+[[ -f "${chain_dst}" ]] && chmod 644 "${chain_dst}" || true
 
-validate_pem_cert_balance "${cert_dst}" || fail "Invalid cert.pem."
-validate_pem_cert_balance "${fullchain_dst}" || fail "Invalid fullchain.pem."
+validate_pem_cert_balance "${cert_dst}" || fail "Invalid generated cert.pem. Certificate files were written but did not pass validation."
+validate_pem_cert_balance "${fullchain_dst}" || fail "Invalid generated fullchain.pem. Certificate files were written but did not pass validation."
 [[ -f "${chain_dst}" ]] && validate_pem_cert_balance "${chain_dst}" || true
 
-cert_pub_hash="$(openssl x509 -in "${cert_dst}" -pubkey -noout | openssl pkey -pubin -outform DER | openssl sha256)"
-key_pub_hash="$(openssl pkey -in "${key_dst}" -pubout -outform DER | openssl sha256)"
-[[ "${cert_pub_hash}" == "${key_pub_hash}" ]] || fail "Private key does not match certificate."
+cert_pub_hash="$(openssl x509 -in "${cert_dst}" -pubkey -noout | openssl pkey -pubin -outform DER | openssl sha256)" || fail "Could not derive public key from certificate. Certificate import is incomplete."
+key_pub_hash="$(openssl pkey -in "${key_dst}" -pubout -outform DER | openssl sha256)" || fail "Could not derive public key from private key. Certificate import is incomplete."
+[[ "${cert_pub_hash}" == "${key_pub_hash}" ]] || fail "Private key does not match certificate. Certificate files were written but should not be used."
 
 {
     echo "Certificate folder/domain: ${cert_folder}"
@@ -178,10 +180,10 @@ key_pub_hash="$(openssl pkey -in "${key_dst}" -pubout -outform DER | openssl sha
     for chain_file in "${chain_files[@]:-}"; do
         echo "  - ${chain_file}"
     done
-} > "${source_notes}"
+} > "${source_notes}" || fail "Could not write certificate source notes: ${source_notes}."
 
-chmod 600 "${source_notes}"
-chown root:root "${source_notes}"
+chmod 600 "${source_notes}" || fail "Could not secure certificate source notes: ${source_notes}."
+chown root:root "${source_notes}" || fail "Could not set ownership for certificate source notes: ${source_notes}."
 
 [[ -n "${temp_extract_dir}" && -d "${temp_extract_dir}" ]] && rm -rf "${temp_extract_dir}"
 

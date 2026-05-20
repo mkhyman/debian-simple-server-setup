@@ -8,20 +8,21 @@ require_base_system_complete
 export DEBIAN_FRONTEND=noninteractive
 
 info "Installing Apache, MariaDB, Redis and base tooling."
-run apt-get update || fail "apt-get update failed."
+run apt-get update || fail "apt-get update failed. Web stack package installation was not attempted."
 run apt-get install -y apache2 mariadb-server redis-server curl wget ca-certificates \
-    lsb-release apt-transport-https gnupg openssl unzip || fail "Web stack base package install failed."
+    lsb-release apt-transport-https gnupg openssl unzip || fail "Web stack base package install failed. Apache, MariaDB, Redis or base tooling may be partially installed."
 
 # Sury is used because personal hosting sometimes needs legacy PHP beside the
 # current default; co-installable versions keep old sites contained.
 info "Configuring Sury PHP repository for co-installable PHP versions including PHP 7.4."
 if [[ ! -f "${SURY_KEYRING}" ]]; then
-    run bash -c "curl -fsSL https://packages.sury.org/php/apt.gpg | gpg --dearmor -o '${SURY_KEYRING}'" || fail "Could not install Sury keyring."
+    run bash -c "curl -fsSL https://packages.sury.org/php/apt.gpg | gpg --dearmor -o '${SURY_KEYRING}'" || fail "Could not install Sury PHP keyring. PHP packages from Sury were not installed."
 fi
 
 codename="$(. /etc/os-release && echo "${VERSION_CODENAME}")"
-echo "deb [signed-by=${SURY_KEYRING}] https://packages.sury.org/php/ ${codename} main" > "${SURY_LIST}"
-run apt-get update || fail "apt-get update failed after adding Sury repository."
+echo "deb [signed-by=${SURY_KEYRING}] https://packages.sury.org/php/ ${codename} main" > "${SURY_LIST}" \
+    || fail "Could not write Sury PHP APT source list: ${SURY_LIST}. PHP packages from Sury were not installed."
+run apt-get update || fail "apt-get update failed after adding Sury repository. PHP version installation was not attempted."
 
 for php_version in "${PHP_VERSIONS[@]}"; do
     info "Installing PHP ${php_version} with Laravel-friendly extensions."
@@ -30,8 +31,8 @@ for php_version in "${PHP_VERSIONS[@]}"; do
         "php${php_version}-mysql" "php${php_version}-mbstring" "php${php_version}-xml" \
         "php${php_version}-curl" "php${php_version}-zip" "php${php_version}-bcmath" \
         "php${php_version}-intl" "php${php_version}-gd" "php${php_version}-readline" \
-        "php${php_version}-opcache" "php${php_version}-redis" || fail "Could not install PHP ${php_version}."
-    service_enable_now "php${php_version}-fpm" || fail "Could not enable PHP-FPM ${php_version}."
+        "php${php_version}-opcache" "php${php_version}-redis" || fail "Could not install PHP ${php_version} and required extensions. Later site creation for this PHP version will fail until this is fixed."
+    service_enable_now "php${php_version}-fpm" || fail "Could not enable PHP-FPM ${php_version}. The packages may be installed, but the service is not ready for sites."
 done
 
 if command -v "php${DEFAULT_PHP_VERSION}" >/dev/null 2>&1; then
@@ -41,43 +42,44 @@ fi
 # Apache is kept as the stable front door; PHP runs through FPM so each site can
 # have its own pool and user rather than sharing mod_php process state.
 info "Enabling Apache modules."
-run a2enmod rewrite headers ssl proxy_fcgi setenvif http2 expires deflate proxy proxy_http remoteip || fail "Could not enable Apache modules."
+run a2enmod rewrite headers ssl proxy_fcgi setenvif http2 expires deflate proxy proxy_http remoteip || fail "Could not enable required Apache modules. Apache was not restarted."
 a2dismod php8.4 php7.4 >>"${LOG_FILE}" 2>&1 || true
 
 # Validate before restart because Apache is shared infrastructure: one broken
 # module/vhost should not take every personal site offline.
-service_enable_now apache2 || fail "Could not enable Apache."
-restart_apache_safely || fail "Could not validate and restart Apache."
+service_enable_now apache2 || fail "Could not enable Apache. Web stack setup stopped before Apache restart validation."
+restart_apache_safely || fail "Apache config validation or restart failed. Apache may still be running with the previous configuration."
 
 # MariaDB is allowed to listen remotely, so TLS is configured as part of the
 # service baseline rather than relying on every database user to remember it.
 info "Preparing MariaDB TLS files."
-install -d -m 750 -o mysql -g mysql "${MARIADB_SSL_DIR}"
+install -d -m 750 -o mysql -g mysql "${MARIADB_SSL_DIR}" \
+    || fail "Could not create MariaDB TLS directory: ${MARIADB_SSL_DIR}. MariaDB TLS was not configured."
 
 if [[ ! -f "${MARIADB_CA_CERT}" ]]; then
-    run bash -c "openssl genrsa 4096 > '${MARIADB_CA_KEY}'" || fail "Could not generate MariaDB CA key."
+    run bash -c "openssl genrsa 4096 > '${MARIADB_CA_KEY}'" || fail "Could not generate MariaDB CA key. MariaDB TLS config was not applied."
     run openssl req -new -x509 -nodes -days 3650 \
         -key "${MARIADB_CA_KEY}" \
         -out "${MARIADB_CA_CERT}" \
-        -subj "/CN=$(hostname -f 2>/dev/null || hostname)-MariaDB-CA" || fail "Could not generate MariaDB CA certificate."
+        -subj "/CN=$(hostname -f 2>/dev/null || hostname)-MariaDB-CA" || fail "Could not generate MariaDB CA certificate. MariaDB TLS config was not applied."
 fi
 
 if [[ ! -f "${MARIADB_SERVER_CERT}" ]]; then
     run openssl req -newkey rsa:4096 -days 3650 -nodes \
         -keyout "${MARIADB_SERVER_KEY}" \
         -out "${MARIADB_SERVER_CSR}" \
-        -subj "/CN=$(hostname -f 2>/dev/null || hostname)" || fail "Could not generate MariaDB server CSR."
+        -subj "/CN=$(hostname -f 2>/dev/null || hostname)" || fail "Could not generate MariaDB server CSR. MariaDB TLS config was not applied."
     run openssl x509 -req -in "${MARIADB_SERVER_CSR}" \
         -days 3650 \
         -CA "${MARIADB_CA_CERT}" \
         -CAkey "${MARIADB_CA_KEY}" \
         -set_serial 01 \
-        -out "${MARIADB_SERVER_CERT}" || fail "Could not sign MariaDB server certificate."
+        -out "${MARIADB_SERVER_CERT}" || fail "Could not sign MariaDB server certificate. MariaDB TLS config was not applied."
 fi
 
-run chown -R mysql:mysql "${MARIADB_SSL_DIR}" || fail "Could not chown MariaDB SSL dir."
-run chmod 600 "${MARIADB_CA_KEY}" "${MARIADB_SERVER_KEY}" || fail "Could not chmod MariaDB private keys."
-run chmod 644 "${MARIADB_CA_CERT}" "${MARIADB_SERVER_CERT}" || fail "Could not chmod MariaDB certs."
+run chown -R mysql:mysql "${MARIADB_SSL_DIR}" || fail "Could not set MariaDB TLS directory ownership. MariaDB restart was not attempted."
+run chmod 600 "${MARIADB_CA_KEY}" "${MARIADB_SERVER_KEY}" || fail "Could not secure MariaDB private keys. MariaDB restart was not attempted."
+run chmod 644 "${MARIADB_CA_CERT}" "${MARIADB_SERVER_CERT}" || fail "Could not set MariaDB certificate permissions. MariaDB restart was not attempted."
 
 tmp_mariadb="$(mktemp)"
 cat >"${tmp_mariadb}" <<EOF
@@ -91,24 +93,26 @@ ssl-cert = ${MARIADB_SERVER_CERT}
 ssl-key = ${MARIADB_SERVER_KEY}
 EOF
 
-write_managed_file "${MARIADB_REMOTE_SSL_CONFIG}" 0644 root:root "${tmp_mariadb}" || fail "Could not write MariaDB TLS config."
+write_managed_file "${MARIADB_REMOTE_SSL_CONFIG}" 0644 root:root "${tmp_mariadb}" || fail "Could not write MariaDB TLS config. MariaDB restart was not attempted."
 
 # MariaDB config is validated before restart for the same reason as Apache: a
 # bad generated snippet should fail safely before the daemon is disrupted.
-service_enable_now mariadb || fail "Could not enable MariaDB."
-restart_mariadb_safely || fail "Could not validate and restart MariaDB."
+service_enable_now mariadb || fail "Could not enable MariaDB. TLS config may be written, but service state was not changed."
+restart_mariadb_safely || fail "MariaDB config validation or restart failed. MariaDB may still be running with the previous configuration."
 
 # Redis is kept local-only because Laravel typically uses it as an application
 # dependency, not as a public network service.
 info "Configuring Redis as local-only."
-backup_file /etc/redis/redis.conf || fail "Could not back up redis.conf."
-sed -i -E "s/^bind .*/bind ${REDIS_BIND}/" /etc/redis/redis.conf
-sed -i -E "s/^protected-mode .*/protected-mode yes/" /etc/redis/redis.conf
+backup_file /etc/redis/redis.conf || fail "Could not back up redis.conf. Redis config was not edited."
+sed -i -E "s/^bind .*/bind ${REDIS_BIND}/" /etc/redis/redis.conf \
+    || fail "Could not set Redis bind address. Redis was not restarted."
+sed -i -E "s/^protected-mode .*/protected-mode yes/" /etc/redis/redis.conf \
+    || fail "Could not enable Redis protected mode. Redis was not restarted."
 
-service_enable_now redis-server || fail "Could not enable Redis."
-restart_redis_safely || fail "Could not restart Redis."
+service_enable_now redis-server || fail "Could not enable Redis. Redis config may have been edited, but service state was not changed."
+restart_redis_safely || fail "Could not restart Redis after local-only config update. Redis may still be running with previous settings."
 
-cat >"${SERVER_ADMIN_MARIADB_DIR}/README.txt" <<EOF
+if ! cat >"${SERVER_ADMIN_MARIADB_DIR}/README.txt" <<EOF
 MariaDB TLS notes
 =================
 
@@ -122,5 +126,8 @@ MariaDB TLS config:
 Remote users should be created with REQUIRE SSL.
 REQUIRE X509 is intentionally not used at this stage.
 EOF
+then
+    fail "Could not write MariaDB TLS notes file: ${SERVER_ADMIN_MARIADB_DIR}/README.txt."
+fi
 
 ok "Web stack installed."

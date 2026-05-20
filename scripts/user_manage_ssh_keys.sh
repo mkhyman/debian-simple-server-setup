@@ -15,7 +15,7 @@ if ! linux_user_exists "${username}"; then
     fail "User does not exist: ${username}"
 fi
 
-ensure_ssh_authorized_keys_file "${username}" || fail "Could not prepare authorized_keys for ${username}."
+ensure_ssh_authorized_keys_file "${username}" || fail "Could not prepare authorized_keys for ${username}. No SSH key changes were made."
 
 while true; do
     echo
@@ -31,12 +31,12 @@ while true; do
 
     case "${choice}" in
         1)
-            show_authorized_keys "${username}" || fail "Could not show keys."
+            show_authorized_keys "${username}" || fail "Could not show SSH keys for ${username}. No changes were made."
             ;;
         2)
             read -rp "Paste public key: " public_key
             [[ -n "${public_key}" ]] || { warn "No key supplied."; continue; }
-            add_ssh_public_key "${username}" "${public_key}" || fail "Could not add SSH key."
+            add_ssh_public_key "${username}" "${public_key}" || fail "Could not add SSH key for ${username}. Existing keys should be unchanged."
             ok "SSH key added."
             ;;
         3)
@@ -45,14 +45,14 @@ while true; do
             [[ "${typed}" == "REPLACE_KEYS" ]] || { info "Aborted."; continue; }
             read -rp "Paste replacement public key: " public_key
             [[ -n "${public_key}" ]] || { warn "No key supplied."; continue; }
-            replace_ssh_public_keys "${username}" "${public_key}" || fail "Could not replace SSH keys."
+            replace_ssh_public_keys "${username}" "${public_key}" || fail "Could not replace SSH keys for ${username}. A backup should exist if the original authorized_keys was present."
             ok "SSH keys replaced."
             ;;
         4)
-            show_authorized_keys "${username}" || fail "Could not show keys."
+            show_authorized_keys "${username}" || fail "Could not show SSH keys for ${username}. No changes were made."
             read -rp "Key number to remove: " key_number
             confirm "Remove key number ${key_number} for ${username}?" || continue
-            remove_authorized_key_by_number "${username}" "${key_number}" || fail "Could not remove key."
+            remove_authorized_key_by_number "${username}" "${key_number}" || fail "Could not remove SSH key number ${key_number} for ${username}. A backup should exist if authorized_keys was present."
             ok "SSH key removed."
             ;;
         [Qq])
