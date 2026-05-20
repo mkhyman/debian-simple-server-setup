@@ -12,6 +12,8 @@ run apt-get update || fail "apt-get update failed."
 run apt-get install -y apache2 mariadb-server redis-server curl wget ca-certificates \
     lsb-release apt-transport-https gnupg openssl unzip || fail "Web stack base package install failed."
 
+# Sury is used because personal hosting sometimes needs legacy PHP beside the
+# current default; co-installable versions keep old sites contained.
 info "Configuring Sury PHP repository for co-installable PHP versions including PHP 7.4."
 if [[ ! -f "${SURY_KEYRING}" ]]; then
     run bash -c "curl -fsSL https://packages.sury.org/php/apt.gpg | gpg --dearmor -o '${SURY_KEYRING}'" || fail "Could not install Sury keyring."
@@ -29,20 +31,26 @@ for php_version in "${PHP_VERSIONS[@]}"; do
         "php${php_version}-curl" "php${php_version}-zip" "php${php_version}-bcmath" \
         "php${php_version}-intl" "php${php_version}-gd" "php${php_version}-readline" \
         "php${php_version}-opcache" "php${php_version}-redis" || fail "Could not install PHP ${php_version}."
-    run systemctl enable --now "php${php_version}-fpm" || fail "Could not enable PHP-FPM ${php_version}."
+    service_enable_now "php${php_version}-fpm" || fail "Could not enable PHP-FPM ${php_version}."
 done
 
 if command -v "php${DEFAULT_PHP_VERSION}" >/dev/null 2>&1; then
     run update-alternatives --set php "/usr/bin/php${DEFAULT_PHP_VERSION}" || warn "Could not set default CLI PHP."
 fi
 
+# Apache is kept as the stable front door; PHP runs through FPM so each site can
+# have its own pool and user rather than sharing mod_php process state.
 info "Enabling Apache modules."
 run a2enmod rewrite headers ssl proxy_fcgi setenvif http2 expires deflate proxy proxy_http remoteip || fail "Could not enable Apache modules."
 a2dismod php8.4 php7.4 >>"${LOG_FILE}" 2>&1 || true
 
-run systemctl enable --now apache2 || fail "Could not enable Apache."
-run systemctl restart apache2 || fail "Could not restart Apache."
+# Validate before restart because Apache is shared infrastructure: one broken
+# module/vhost should not take every personal site offline.
+service_enable_now apache2 || fail "Could not enable Apache."
+restart_apache_safely || fail "Could not validate and restart Apache."
 
+# MariaDB is allowed to listen remotely, so TLS is configured as part of the
+# service baseline rather than relying on every database user to remember it.
 info "Preparing MariaDB TLS files."
 install -d -m 750 -o mysql -g mysql "${MARIADB_SSL_DIR}"
 
@@ -85,16 +93,20 @@ EOF
 
 write_managed_file "${MARIADB_REMOTE_SSL_CONFIG}" 0644 root:root "${tmp_mariadb}" || fail "Could not write MariaDB TLS config."
 
-run systemctl enable --now mariadb || fail "Could not enable MariaDB."
-run systemctl restart mariadb || fail "Could not restart MariaDB."
+# MariaDB config is validated before restart for the same reason as Apache: a
+# bad generated snippet should fail safely before the daemon is disrupted.
+service_enable_now mariadb || fail "Could not enable MariaDB."
+restart_mariadb_safely || fail "Could not validate and restart MariaDB."
 
+# Redis is kept local-only because Laravel typically uses it as an application
+# dependency, not as a public network service.
 info "Configuring Redis as local-only."
 backup_file /etc/redis/redis.conf || fail "Could not back up redis.conf."
 sed -i -E "s/^bind .*/bind ${REDIS_BIND}/" /etc/redis/redis.conf
 sed -i -E "s/^protected-mode .*/protected-mode yes/" /etc/redis/redis.conf
 
-run systemctl enable --now redis-server || fail "Could not enable Redis."
-run systemctl restart redis-server || fail "Could not restart Redis."
+service_enable_now redis-server || fail "Could not enable Redis."
+restart_redis_safely || fail "Could not restart Redis."
 
 cat >"${SERVER_ADMIN_MARIADB_DIR}/README.txt" <<EOF
 MariaDB TLS notes

@@ -5,6 +5,8 @@ source "${repo_root}/lib/common.sh" "$@"
 require_root
 require_base_system_complete
 
+# Vhost creation joins several shared systems, so every generated config is
+# validated before services are touched.
 read -rp "Primary hostname / ServerName, e.g. shop.example.com: " hostname
 validate_hostname "${hostname}" || fail "Invalid hostname: ${hostname}"
 
@@ -67,6 +69,8 @@ docroot="$(site_docroot_for_user "${site_user}" "${is_laravel}")"
 socket="/run/php/php${php_version}-fpm-${site_user}.sock"
 pool_file="/etc/php/${php_version}/fpm/pool.d/${site_user}.conf"
 
+# A dedicated PHP-FPM pool preserves the per-site-user isolation model and makes
+# legacy PHP usage explicit at the site boundary.
 tmp_pool="$(mktemp)"
 cat >"${tmp_pool}" <<EOF
 $(managed_header "website_create_https_vhost.sh")
@@ -103,6 +107,8 @@ fi
 http_vhost="/etc/apache2/sites-available/${hostname}.conf"
 https_vhost="/etc/apache2/sites-available/${hostname}-ssl.conf"
 
+# HTTP is kept only as a redirect endpoint; the actual application surface is
+# the HTTPS vhost below.
 tmp_http="$(mktemp)"
 cat >"${tmp_http}" <<EOF
 $(managed_header "website_create_https_vhost.sh")
@@ -150,8 +156,8 @@ ${server_alias_line}
     Header always set X-Frame-Options "SAMEORIGIN"
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
 
-    # HSTS is deliberately not enabled by default.
-    # Enable only once all relevant subdomains have working HTTPS.
+    # HSTS is deliberately not enabled by default because personal hosting often
+    # has subdomains at different stages of setup; premature HSTS is painful to undo.
     # Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
 </VirtualHost>
 </IfModule>
@@ -162,8 +168,9 @@ write_managed_file "${https_vhost}" 0644 root:root "${tmp_https}" || fail "Could
 
 run a2ensite "${hostname}.conf" || fail "Could not enable HTTP vhost."
 run a2ensite "${hostname}-ssl.conf" || fail "Could not enable HTTPS vhost."
-run apache2ctl configtest || fail "Apache configtest failed."
-run systemctl restart "php${php_version}-fpm" || fail "Could not restart PHP-FPM ${php_version}."
-run systemctl reload apache2 || fail "Could not reload Apache."
+# PHP-FPM is restarted first so Apache never points at a pool configuration that
+# has not been accepted by the PHP-FPM daemon.
+restart_php_fpm_safely "${php_version}" || fail "Could not validate and restart PHP-FPM ${php_version}."
+reload_apache_safely || fail "Could not validate and reload Apache."
 
 ok "HTTPS site created for ${hostname}."

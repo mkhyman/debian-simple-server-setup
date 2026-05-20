@@ -109,6 +109,102 @@ run() {
     fi
 }
 
+
+###############################################################################
+# SERVICE AND CONFIGURATION HELPERS
+#
+# These wrappers deliberately keep init-system and validation details out of the
+# action scripts. The toolkit currently targets Debian 13 with systemd, but the
+# scripts should express intent rather than bake that assumption into every file.
+###############################################################################
+
+service_enable_now() {
+    local service_name="$1"
+
+    # Centralising service control gives future Debian changes a single edit
+    # point instead of leaving package scripts full of init-system assumptions.
+    run systemctl enable --now "${service_name}"
+}
+
+service_restart() {
+    local service_name="$1"
+
+    # Restart is intentionally wrapped because it is disruptive: callers should
+    # read as operational intent, while this function owns the platform detail.
+    run systemctl restart "${service_name}"
+}
+
+service_reload() {
+    local service_name="$1"
+
+    # Reload is preferred where possible because it preserves live connections;
+    # this wrapper keeps that policy visible and easy to change globally.
+    run systemctl reload "${service_name}"
+}
+
+validate_apache_config() {
+    # Apache is shared by all hosted sites, so one bad generated vhost must be
+    # caught before the daemon is reloaded and every site is put at risk.
+    run apache2ctl configtest
+}
+
+reload_apache_safely() {
+    validate_apache_config || return 1
+    service_reload apache2
+}
+
+restart_apache_safely() {
+    validate_apache_config || return 1
+    service_restart apache2
+}
+
+validate_sshd_config() {
+    # SSH mistakes can lock out remote administration; validation is mandatory
+    # before changing the running daemon.
+    run /usr/sbin/sshd -t
+}
+
+reload_sshd_safely() {
+    validate_sshd_config || return 1
+    service_reload ssh
+}
+
+validate_php_fpm_config() {
+    local php_version="$1"
+
+    # Per-site pools are generated dynamically, so test the complete PHP-FPM
+    # configuration before restarting the version that serves those pools.
+    run "php-fpm${php_version}" -t
+}
+
+restart_php_fpm_safely() {
+    local php_version="$1"
+
+    validate_php_fpm_config "${php_version}" || return 1
+    service_restart "php${php_version}-fpm"
+}
+
+validate_mariadb_config() {
+    # MariaDB validation differs a little across releases. Prefer the explicit
+    # validator when present, and fall back to the server's config-parsing path.
+    if mariadbd --help --verbose 2>&1 | grep -q -- '--validate-config'; then
+        run mariadbd --validate-config
+    else
+        run mysqld --verbose --help
+    fi
+}
+
+restart_mariadb_safely() {
+    validate_mariadb_config || return 1
+    service_restart mariadb
+}
+
+restart_redis_safely() {
+    # Redis has no consistently useful offline config validator on the target
+    # Debian baseline, so the risky part is kept behind one wrapper for now.
+    service_restart redis-server
+}
+
 backup_file() {
     local file="$1"
 
@@ -335,8 +431,7 @@ ensure_sshd_allow_user() {
         echo "AllowUsers ${username}" >> "${sshd_config}" || return 1
     fi
 
-    /usr/sbin/sshd -t || return 1
-    systemctl reload ssh || return 1
+    reload_sshd_safely || return 1
 }
 
 validate_hostname() {

@@ -5,6 +5,8 @@ source "${repo_root}/lib/common.sh" "$@"
 require_root
 require_base_system_complete
 
+# Root SSH lockout is intentionally separate from base setup because it is one
+# of the few changes that can make remote recovery awkward if done prematurely.
 warn "This disables SSH login for root."
 warn "Before continuing, confirm from a separate terminal that an admin user can SSH in and use sudo."
 
@@ -23,6 +25,8 @@ fi
 read -rp "Type DISABLE_ROOT to continue: " typed
 [[ "${typed}" == "DISABLE_ROOT" ]] || { info "Aborted."; exit 0; }
 
+# Back up before editing and validate before reload; SSH configuration mistakes
+# are high-impact because they can remove the only remote access path.
 backup_file /etc/ssh/sshd_config || fail "Could not back up sshd_config."
 
 if grep -Eq "^[#[:space:]]*PermitRootLogin[[:space:]]+" /etc/ssh/sshd_config; then
@@ -31,7 +35,6 @@ else
     echo "PermitRootLogin no" >> /etc/ssh/sshd_config
 fi
 
-run /usr/sbin/sshd -t || fail "sshd config validation failed."
-run systemctl reload ssh || fail "Could not reload ssh."
+reload_sshd_safely || fail "Could not validate and reload ssh."
 
 ok "Root SSH login disabled."

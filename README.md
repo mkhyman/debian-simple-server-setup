@@ -59,6 +59,17 @@ sudo ./run_server_setup.sh
 
 ---
 
+## Rerunning scripts
+
+Scripts are intended to be safe to rerun:
+
+- unchanged managed files are skipped
+- changed managed files are backed up before replacement
+- potentially destructive overwrites ask for confirmation
+- scripts should not append duplicate configuration
+
+If a script refuses to run, read the message first; it is usually protecting a dependency such as the base-system marker or a missing website user.
+
 ## Runtime locations
 
 Default runtime/admin directory:
