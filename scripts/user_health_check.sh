@@ -13,7 +13,50 @@ health_ok() { ok "$*"; MH_USER_HC_PASS_COUNT=$((MH_USER_HC_PASS_COUNT+1)); }
 health_warn() { warn "$*"; MH_USER_HC_WARN_COUNT=$((MH_USER_HC_WARN_COUNT+1)); }
 health_fail() { echo "[FAIL] $*"; echo "[FAIL] $*" >>"${LOG_FILE}"; MH_USER_HC_FAIL_COUNT=$((MH_USER_HC_FAIL_COUNT+1)); }
 
-maybe_fix_dir() {
+user_hc_path_exists() {
+    local path="$1"
+    local type="$2"
+
+    case "${type}" in
+        dir) [[ -d "${path}" ]] ;;
+        file) [[ -f "${path}" ]] ;;
+        *) return 1 ;;
+    esac
+}
+
+user_hc_path_has_mode_owner() {
+    local path="$1"
+    local expected_mode="$2"
+    local expected_owner="$3"
+    local expected_group="$4"
+    local actual_mode actual_owner actual_group
+
+    [[ -e "${path}" ]] || return 1
+
+    actual_mode="$(stat -c '%a' "${path}")"
+    actual_owner="$(stat -c '%U' "${path}")"
+    actual_group="$(stat -c '%G' "${path}")"
+
+    [[ "${actual_mode}" == "${expected_mode}" \
+        && "${actual_owner}" == "${expected_owner}" \
+        && "${actual_group}" == "${expected_group}" ]]
+}
+
+user_hc_describe_path_mode_owner() {
+    local path="$1"
+    local expected_mode="$2"
+    local expected_owner="$3"
+    local expected_group="$4"
+    local actual_mode actual_owner actual_group
+
+    actual_mode="$(stat -c '%a' "${path}")"
+    actual_owner="$(stat -c '%U' "${path}")"
+    actual_group="$(stat -c '%G' "${path}")"
+
+    echo "${path} is ${actual_owner}:${actual_group} ${actual_mode}; expected ${expected_owner}:${expected_group} ${expected_mode}."
+}
+
+user_hc_offer_fix_dir() {
     local path="$1"
     local mode="$2"
     local owner="$3"
@@ -29,7 +72,7 @@ maybe_fix_dir() {
     fi
 }
 
-maybe_fix_file() {
+user_hc_offer_fix_file() {
     local path="$1"
     local mode="$2"
     local owner="$3"
@@ -47,7 +90,7 @@ maybe_fix_file() {
     fi
 }
 
-check_path() {
+user_hc_report_path_mode_owner() {
     local path="$1"
     local type="$2"
     local expected_mode="$3"
@@ -56,31 +99,25 @@ check_path() {
     local reason="$6"
     local interactive_fix="$7"
 
-    if [[ "${type}" == "dir" && ! -d "${path}" ]]; then
-        health_fail "Missing directory: ${path}"
-        maybe_fix_dir "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}" "${interactive_fix}"
+    if ! user_hc_path_exists "${path}" "${type}"; then
+        if [[ "${type}" == "dir" ]]; then
+            health_fail "Missing directory: ${path}"
+            user_hc_offer_fix_dir "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}" "${interactive_fix}"
+        else
+            health_warn "Missing file: ${path}"
+            user_hc_offer_fix_file "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}" "${interactive_fix}"
+        fi
         return 0
     fi
 
-    if [[ "${type}" == "file" && ! -f "${path}" ]]; then
-        health_warn "Missing file: ${path}"
-        maybe_fix_file "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}" "${interactive_fix}"
-        return 0
-    fi
-
-    local actual_mode actual_owner actual_group
-    actual_mode="$(stat -c '%a' "${path}")"
-    actual_owner="$(stat -c '%U' "${path}")"
-    actual_group="$(stat -c '%G' "${path}")"
-
-    if [[ "${actual_mode}" == "${expected_mode}" && "${actual_owner}" == "${expected_owner}" && "${actual_group}" == "${expected_group}" ]]; then
+    if user_hc_path_has_mode_owner "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}"; then
         health_ok "${path} has expected owner and mode."
     else
-        health_fail "${path} is ${actual_owner}:${actual_group} ${actual_mode}; expected ${expected_owner}:${expected_group} ${expected_mode}."
+        health_fail "$(user_hc_describe_path_mode_owner "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}")"
         if [[ "${type}" == "dir" ]]; then
-            maybe_fix_dir "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}" "${interactive_fix}"
+            user_hc_offer_fix_dir "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}" "${interactive_fix}"
         else
-            maybe_fix_file "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}" "${interactive_fix}"
+            user_hc_offer_fix_file "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}" "${interactive_fix}"
         fi
     fi
 }
@@ -144,8 +181,8 @@ main_user_health_check() {
     ssh_dir="${home_dir}/.ssh"
     auth_keys="${ssh_dir}/authorized_keys"
 
-    check_path "${ssh_dir}" dir 700 "${target_user}" "${target_user}" ".ssh must not be accessible by other users; OpenSSH may reject loose permissions." "${interactive_fix}"
-    check_path "${auth_keys}" file 600 "${target_user}" "${target_user}" "authorized_keys should be readable only by the account owner." "${interactive_fix}"
+    user_hc_report_path_mode_owner "${ssh_dir}" dir 700 "${target_user}" "${target_user}" ".ssh must not be accessible by other users; OpenSSH may reject loose permissions." "${interactive_fix}"
+    user_hc_report_path_mode_owner "${auth_keys}" file 600 "${target_user}" "${target_user}" "authorized_keys should be readable only by the account owner." "${interactive_fix}"
 
     if [[ -f "${auth_keys}" && -s "${auth_keys}" ]]; then
         health_ok "authorized_keys contains at least one key."

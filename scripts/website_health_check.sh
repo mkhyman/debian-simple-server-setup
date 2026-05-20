@@ -13,7 +13,74 @@ health_ok() { ok "$*"; MH_WEBSITE_HC_PASS_COUNT=$((MH_WEBSITE_HC_PASS_COUNT+1));
 health_warn() { warn "$*"; MH_WEBSITE_HC_WARN_COUNT=$((MH_WEBSITE_HC_WARN_COUNT+1)); }
 health_fail() { echo "[FAIL] $*"; echo "[FAIL] $*" >>"${LOG_FILE}"; MH_WEBSITE_HC_FAIL_COUNT=$((MH_WEBSITE_HC_FAIL_COUNT+1)); }
 
-maybe_fix_dir() {
+website_hc_dir_has_mode_owner() {
+    local path="$1"
+    local expected_mode="$2"
+    local expected_owner="$3"
+    local expected_group="$4"
+    local actual_mode actual_owner actual_group
+
+    [[ -d "${path}" ]] || return 1
+
+    actual_mode="$(stat -c '%a' "${path}")"
+    actual_owner="$(stat -c '%U' "${path}")"
+    actual_group="$(stat -c '%G' "${path}")"
+
+    [[ "${actual_mode}" == "${expected_mode}" \
+        && "${actual_owner}" == "${expected_owner}" \
+        && "${actual_group}" == "${expected_group}" ]]
+}
+
+website_hc_describe_dir_mode_owner() {
+    local path="$1"
+    local expected_mode="$2"
+    local expected_owner="$3"
+    local expected_group="$4"
+    local actual_mode actual_owner actual_group
+
+    if [[ ! -d "${path}" ]]; then
+        echo "Missing directory: ${path}"
+        return 0
+    fi
+
+    actual_mode="$(stat -c '%a' "${path}")"
+    actual_owner="$(stat -c '%U' "${path}")"
+    actual_group="$(stat -c '%G' "${path}")"
+
+    echo "${path} is ${actual_owner}:${actual_group} ${actual_mode}; expected ${expected_owner}:${expected_group} ${expected_mode}."
+}
+
+website_hc_acl_contains() {
+    local path="$1"
+    local acl_pattern="$2"
+
+    command -v getfacl >/dev/null 2>&1 || return 2
+    getfacl -cp "${path}" 2>/dev/null | grep -Eq "${acl_pattern}"
+}
+
+website_hc_file_is_world_readable() {
+    local path="$1"
+    local mode others_digit
+
+    [[ -f "${path}" ]] || return 1
+    mode="$(stat -c '%a' "${path}")"
+    others_digit="${mode: -1}"
+
+    (( others_digit > 0 ))
+}
+
+website_hc_describe_file_mode_owner() {
+    local path="$1"
+    local mode owner group
+
+    mode="$(stat -c '%a' "${path}")"
+    owner="$(stat -c '%U' "${path}")"
+    group="$(stat -c '%G' "${path}")"
+
+    echo "${path} is ${owner}:${group} ${mode}."
+}
+
+website_hc_offer_fix_dir() {
     local path="$1"
     local mode="$2"
     local owner="$3"
@@ -29,7 +96,7 @@ maybe_fix_dir() {
     fi
 }
 
-maybe_fix_file_mode_owner() {
+website_hc_offer_fix_file_mode_owner() {
     local path="$1"
     local mode="$2"
     local owner="$3"
@@ -47,7 +114,21 @@ maybe_fix_file_mode_owner() {
     fi
 }
 
-check_dir() {
+website_hc_offer_reapply_acls() {
+    local site_user="$1"
+    local is_laravel="$2"
+    local interactive_fix="$3"
+
+    [[ "${interactive_fix}" == "yes" ]] || return 0
+
+    echo "Apache should receive only the access it needs while PHP runs as the site user."
+    if confirm "Re-apply toolkit ACLs for ${site_user}?"; then
+        ensure_website_acls "${site_user}" "${is_laravel}" || { health_fail "Could not re-apply website ACLs."; return 1; }
+        health_ok "Re-applied website ACLs for ${site_user}."
+    fi
+}
+
+website_hc_report_dir_mode_owner() {
     local path="$1"
     local expected_mode="$2"
     local expected_owner="$3"
@@ -55,70 +136,52 @@ check_dir() {
     local reason="$5"
     local interactive_fix="$6"
 
-    if [[ ! -d "${path}" ]]; then
-        health_fail "Missing directory: ${path}"
-        maybe_fix_dir "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}" "${interactive_fix}"
-        return 0
-    fi
-
-    local actual_mode actual_owner actual_group
-    actual_mode="$(stat -c '%a' "${path}")"
-    actual_owner="$(stat -c '%U' "${path}")"
-    actual_group="$(stat -c '%G' "${path}")"
-
-    if [[ "${actual_mode}" == "${expected_mode}" && "${actual_owner}" == "${expected_owner}" && "${actual_group}" == "${expected_group}" ]]; then
+    if website_hc_dir_has_mode_owner "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}"; then
         health_ok "${path} has expected owner and mode."
     else
-        health_fail "${path} is ${actual_owner}:${actual_group} ${actual_mode}; expected ${expected_owner}:${expected_group} ${expected_mode}."
-        maybe_fix_dir "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}" "${interactive_fix}"
+        health_fail "$(website_hc_describe_dir_mode_owner "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}")"
+        website_hc_offer_fix_dir "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}" "${interactive_fix}"
     fi
 }
 
-check_acl_contains() {
+website_hc_report_acl_contains() {
     local path="$1"
     local acl_pattern="$2"
     local description="$3"
     local site_user="$4"
     local is_laravel="$5"
     local interactive_fix="$6"
+    local acl_result
 
-    if ! command -v getfacl >/dev/null 2>&1; then
-        health_warn "Cannot check ACLs because getfacl is not installed."
-        return 0
-    fi
+    website_hc_acl_contains "${path}" "${acl_pattern}"
+    acl_result=$?
 
-    if getfacl -cp "${path}" 2>/dev/null | grep -Eq "${acl_pattern}"; then
-        health_ok "${description}"
-    else
-        health_fail "Missing ACL: ${description}"
-        if [[ "${interactive_fix}" == "yes" ]]; then
-            echo "Apache should receive only the access it needs while PHP runs as the site user."
-            if confirm "Re-apply toolkit ACLs for ${site_user}?"; then
-                ensure_website_acls "${site_user}" "${is_laravel}" || { health_fail "Could not re-apply website ACLs."; return 1; }
-                health_ok "Re-applied website ACLs for ${site_user}."
-            fi
-        fi
-    fi
+    case "${acl_result}" in
+        0)
+            health_ok "${description}"
+            ;;
+        2)
+            health_warn "Cannot check ACLs because getfacl is not installed."
+            ;;
+        *)
+            health_fail "Missing ACL: ${description}"
+            website_hc_offer_reapply_acls "${site_user}" "${is_laravel}" "${interactive_fix}"
+            ;;
+    esac
 }
 
-check_file_not_world_readable() {
+website_hc_report_file_not_world_readable() {
     local path="$1"
     local site_user="$2"
     local interactive_fix="$3"
 
     [[ -f "${path}" ]] || return 0
 
-    local mode owner group others_digit
-    mode="$(stat -c '%a' "${path}")"
-    owner="$(stat -c '%U' "${path}")"
-    group="$(stat -c '%G' "${path}")"
-    others_digit="${mode: -1}"
-
-    if (( others_digit == 0 )); then
-        health_ok "${path} is not world-readable."
+    if website_hc_file_is_world_readable "${path}"; then
+        health_fail "$(website_hc_describe_file_mode_owner "${path}") It should not be world-readable."
+        website_hc_offer_fix_file_mode_owner "${path}" 600 "${site_user}" "${site_user}" ".env often contains secrets, so other local users should not be able to read it." "${interactive_fix}"
     else
-        health_fail "${path} is ${owner}:${group} ${mode}; it should not be world-readable."
-        maybe_fix_file_mode_owner "${path}" 600 "${site_user}" "${site_user}" ".env often contains secrets, so other local users should not be able to read it." "${interactive_fix}"
+        health_ok "${path} is not world-readable."
     fi
 }
 
@@ -176,27 +239,29 @@ main_website_health_check() {
     fi
     health_ok "Linux site user exists: ${site_user}"
 
-    check_dir "${site_home}" 750 "${site_user}" "${site_user}" "The site home should be private to the site user, with Apache granted access through ACLs only where needed." "${interactive_fix}"
-    check_dir "${site_root}" 750 "${site_user}" "${site_user}" "The site root should be owned by the PHP-FPM site user, not by Apache." "${interactive_fix}"
-    check_dir "${docroot}" 750 "${site_user}" "${site_user}" "Apache should be able to read the public document root through ACLs without owning the whole site." "${interactive_fix}"
-    check_dir "${logs}" 750 "${site_user}" "${site_user}" "Logs live under the site home so they remain grouped with the site and easy to inspect." "${interactive_fix}"
-    check_dir "${tmpdir}" 750 "${site_user}" "${site_user}" "Per-site temporary storage avoids sharing writable runtime paths across sites." "${interactive_fix}"
+    website_hc_report_dir_mode_owner "${site_home}" 750 "${site_user}" "${site_user}" "The site home should be private to the site user, with Apache granted access through ACLs only where needed." "${interactive_fix}"
+    website_hc_report_dir_mode_owner "${site_root}" 750 "${site_user}" "${site_user}" "The site root should be owned by the PHP-FPM site user, not by Apache." "${interactive_fix}"
+    website_hc_report_dir_mode_owner "${docroot}" 750 "${site_user}" "${site_user}" "Apache should be able to read the public document root through ACLs without owning the whole site." "${interactive_fix}"
+    website_hc_report_dir_mode_owner "${logs}" 750 "${site_user}" "${site_user}" "Logs live under the site home so they remain grouped with the site and easy to inspect." "${interactive_fix}"
+    website_hc_report_dir_mode_owner "${tmpdir}" 750 "${site_user}" "${site_user}" "Per-site temporary storage avoids sharing writable runtime paths across sites." "${interactive_fix}"
 
     if [[ "${is_laravel}" =~ ^[Yy]$ ]]; then
-        check_dir "${site_root}/storage" 775 "${site_user}" "${site_user}" "Laravel storage must be writable by the PHP-FPM site user for cache, sessions, logs and uploads." "${interactive_fix}"
-        check_dir "${site_root}/bootstrap/cache" 775 "${site_user}" "${site_user}" "Laravel bootstrap/cache must be writable by the PHP-FPM site user during deployment and cache rebuilds." "${interactive_fix}"
+        website_hc_report_dir_mode_owner "${site_root}/storage" 775 "${site_user}" "${site_user}" "Laravel storage must be writable by the PHP-FPM site user for cache, sessions, logs and uploads." "${interactive_fix}"
+        website_hc_report_dir_mode_owner "${site_root}/bootstrap/cache" 775 "${site_user}" "${site_user}" "Laravel bootstrap/cache must be writable by the PHP-FPM site user during deployment and cache rebuilds." "${interactive_fix}"
         [[ -f "${site_root}/artisan" ]] && health_ok "Laravel artisan file exists." || health_warn "Laravel artisan file not found; this may be normal before code is deployed."
         [[ -d "${site_root}/public" ]] && health_ok "Laravel public directory exists." || health_fail "Laravel public directory is missing: ${site_root}/public"
     fi
 
-    check_file_not_world_readable "${site_root}/.env" "${site_user}" "${interactive_fix}"
+    website_hc_report_file_not_world_readable "${site_root}/.env" "${site_user}" "${interactive_fix}"
 
     if command -v getfacl >/dev/null 2>&1; then
-        check_acl_contains "${site_home}" "^user:${APACHE_RUN_USER}:--x$" "Apache has traversal-only access to ${site_home}." "${site_user}" "${is_laravel}" "${interactive_fix}"
-        check_acl_contains "${site_root}" "^user:${APACHE_RUN_USER}:--x$" "Apache has traversal-only access to ${site_root}." "${site_user}" "${is_laravel}" "${interactive_fix}"
-        check_acl_contains "${docroot}" "^user:${APACHE_RUN_USER}:r-x$" "Apache has read/execute access to ${docroot}." "${site_user}" "${is_laravel}" "${interactive_fix}"
-        check_acl_contains "${logs}" "^user:${APACHE_RUN_USER}:rwx$" "Apache can write site logs under ${logs}." "${site_user}" "${is_laravel}" "${interactive_fix}"
-        check_acl_contains "${tmpdir}" "^user:${APACHE_RUN_USER}:rwx$" "Apache can use the site's temporary directory." "${site_user}" "${is_laravel}" "${interactive_fix}"
+        website_hc_report_acl_contains "${site_home}" "^user:${APACHE_RUN_USER}:--x$" "Apache has traversal-only access to ${site_home}." "${site_user}" "${is_laravel}" "${interactive_fix}"
+        website_hc_report_acl_contains "${site_root}" "^user:${APACHE_RUN_USER}:--x$" "Apache has traversal-only access to ${site_root}." "${site_user}" "${is_laravel}" "${interactive_fix}"
+        website_hc_report_acl_contains "${docroot}" "^user:${APACHE_RUN_USER}:r-x$" "Apache has read/execute access to ${docroot}." "${site_user}" "${is_laravel}" "${interactive_fix}"
+        website_hc_report_acl_contains "${logs}" "^user:${APACHE_RUN_USER}:rwx$" "Apache can write site logs under ${logs}." "${site_user}" "${is_laravel}" "${interactive_fix}"
+        website_hc_report_acl_contains "${tmpdir}" "^user:${APACHE_RUN_USER}:rwx$" "Apache can use the site's temporary directory." "${site_user}" "${is_laravel}" "${interactive_fix}"
+    else
+        health_warn "Cannot check ACLs because getfacl is not installed."
     fi
 
     pool_files=()
