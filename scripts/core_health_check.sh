@@ -53,6 +53,7 @@ check_directory_mode_owner() {
     local expected_mode="$2"
     local expected_owner="$3"
     local expected_group="$4"
+    local interactive_fix="$5"
 
     if [[ ! -d "${path}" ]]; then
         health_fail "Missing directory: ${path}"
@@ -69,7 +70,7 @@ check_directory_mode_owner() {
     else
         health_fail "${path} is ${actual_owner}:${actual_group} ${actual_mode}; expected ${expected_owner}:${expected_group} ${expected_mode}."
 
-        if [[ "${MH_CORE_HC_INTERACTIVE_FIX}" == "yes" ]]; then
+        if [[ "${interactive_fix}" == "yes" ]]; then
             echo "For security, this directory should match the toolkit's expected ownership and mode."
             if confirm "Set ${path} to ${expected_owner}:${expected_group} ${expected_mode} now?"; then
                 chown "${expected_owner}:${expected_group}" "${path}" || health_fail "Could not chown ${path}."
@@ -101,72 +102,72 @@ check_disk_space() {
 }
 
 main_core_health_check() {
-    MH_CORE_HC_INTERACTIVE_FIX="no"
-    if [[ "${1:-}" == "--interactive-fix" ]]; then
-        MH_CORE_HC_INTERACTIVE_FIX="yes"
-    fi
-
+    local interactive_fix="no"
     local php_version
 
-echo
-info "Running core system health check."
-if [[ "${MH_CORE_HC_INTERACTIVE_FIX}" == "yes" ]]; then
-    info "Interactive fixes are enabled for low-risk filesystem issues."
-else
-    info "Report-only mode. Re-run with --interactive-fix to be prompted for safe repairs."
-fi
-echo
-
-check_command "SSH configuration validates." validate_sshd_config
-check_command "Apache configuration validates." validate_apache_config
-
-if command -v ufw >/dev/null 2>&1; then
-    if ufw status | grep -q '^Status: active'; then
-        health_ok "UFW is active."
-    else
-        health_fail "UFW is installed but not active."
+    if [[ "${1:-}" == "--interactive-fix" ]]; then
+        interactive_fix="yes"
     fi
-else
-    health_fail "UFW is not installed."
-fi
 
-check_service_active ssh
-check_service_active apache2
-check_service_active mariadb
-check_service_active redis-server
-
-for php_version in "${PHP_VERSIONS[@]}"; do
-    if require_php_fpm_version "${php_version}"; then
-        check_command "PHP-FPM ${php_version} configuration validates." validate_php_fpm_config "${php_version}"
-        check_service_active "php${php_version}-fpm"
+    echo
+    info "Running core system health check."
+    if [[ "${interactive_fix}" == "yes" ]]; then
+        info "Interactive fixes are enabled for low-risk filesystem issues."
     else
-        health_warn "PHP-FPM ${php_version} is configured in config.sh but not installed."
+        info "Report-only mode. Re-run with --interactive-fix to be prompted for safe repairs."
     fi
-done
+    echo
 
-check_directory_mode_owner "${SERVER_ADMIN_DIR}" 2770 root "${SERVER_ADMIN_GROUP}"
-check_directory_mode_owner "${SERVER_ADMIN_LOG_DIR}" 2770 root "${SERVER_ADMIN_GROUP}"
-check_directory_mode_owner "${SERVER_ADMIN_BACKUP_DIR}" 2770 root "${SERVER_ADMIN_GROUP}"
-check_directory_mode_owner "${SERVER_ADMIN_SSL_DIR}" 700 root root
-check_directory_mode_owner "${SERVER_ADMIN_STATE_DIR}" 2770 root "${SERVER_ADMIN_GROUP}"
+    check_command "SSH configuration validates." validate_sshd_config
+    check_command "Apache configuration validates." validate_apache_config
 
-if [[ -f "${BASE_SYSTEM_COMPLETE_FILE}" ]]; then
-    health_ok "Base-system completion marker exists."
-else
-    health_fail "Base-system completion marker is missing: ${BASE_SYSTEM_COMPLETE_FILE}"
-fi
+    if command -v ufw >/dev/null 2>&1; then
+        if ufw status | grep -q '^Status: active'; then
+            health_ok "UFW is active."
+        else
+            health_fail "UFW is installed but not active."
+        fi
+    else
+        health_fail "UFW is not installed."
+    fi
 
-if [[ -f "$(sshd_managed_config_path)" ]]; then
-    health_ok "Managed SSH fragment exists: $(sshd_managed_config_path)"
-else
-    health_warn "Managed SSH fragment does not exist yet: $(sshd_managed_config_path)"
-fi
+    check_service_active ssh
+    check_service_active apache2
+    check_service_active mariadb
+    check_service_active redis-server
 
-check_disk_space "/"
-check_disk_space "${SERVER_ADMIN_DIR}"
+    for php_version in "${PHP_VERSIONS[@]}"; do
+        if require_php_fpm_version "${php_version}"; then
+            check_command "PHP-FPM ${php_version} configuration validates." validate_php_fpm_config "${php_version}"
+            check_service_active "php${php_version}-fpm"
+        else
+            health_warn "PHP-FPM ${php_version} is configured in config.sh but not installed."
+        fi
+    done
 
-echo
-info "Core health check complete: ${MH_CORE_HC_PASS_COUNT} ok, ${MH_CORE_HC_WARN_COUNT} warnings, ${MH_CORE_HC_FAIL_COUNT} failures."
+    check_directory_mode_owner "${SERVER_ADMIN_DIR}" 2770 root "${SERVER_ADMIN_GROUP}" "${interactive_fix}"
+    check_directory_mode_owner "${SERVER_ADMIN_LOG_DIR}" 2770 root "${SERVER_ADMIN_GROUP}" "${interactive_fix}"
+    check_directory_mode_owner "${SERVER_ADMIN_BACKUP_DIR}" 2770 root "${SERVER_ADMIN_GROUP}" "${interactive_fix}"
+    check_directory_mode_owner "${SERVER_ADMIN_SSL_DIR}" 700 root root "${interactive_fix}"
+    check_directory_mode_owner "${SERVER_ADMIN_STATE_DIR}" 2770 root "${SERVER_ADMIN_GROUP}" "${interactive_fix}"
+
+    if [[ -f "${BASE_SYSTEM_COMPLETE_FILE}" ]]; then
+        health_ok "Base-system completion marker exists."
+    else
+        health_fail "Base-system completion marker is missing: ${BASE_SYSTEM_COMPLETE_FILE}"
+    fi
+
+    if [[ -f "$(sshd_managed_config_path)" ]]; then
+        health_ok "Managed SSH fragment exists: $(sshd_managed_config_path)"
+    else
+        health_warn "Managed SSH fragment does not exist yet: $(sshd_managed_config_path)"
+    fi
+
+    check_disk_space "/"
+    check_disk_space "${SERVER_ADMIN_DIR}"
+
+    echo
+    info "Core health check complete: ${MH_CORE_HC_PASS_COUNT} ok, ${MH_CORE_HC_WARN_COUNT} warnings, ${MH_CORE_HC_FAIL_COUNT} failures."
 
     if (( MH_CORE_HC_FAIL_COUNT > 0 )); then
         exit 1

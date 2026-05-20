@@ -19,8 +19,9 @@ maybe_fix_dir() {
     local owner="$3"
     local group="$4"
     local reason="$5"
+    local interactive_fix="$6"
 
-    [[ "${MH_USER_HC_INTERACTIVE_FIX}" == "yes" ]] || return 0
+    [[ "${interactive_fix}" == "yes" ]] || return 0
     echo "${reason}"
     if confirm "Set ${path} to ${owner}:${group} ${mode} now?"; then
         install -d -m "${mode}" -o "${owner}" -g "${group}" "${path}" || { health_fail "Could not fix ${path}."; return 1; }
@@ -34,8 +35,9 @@ maybe_fix_file() {
     local owner="$3"
     local group="$4"
     local reason="$5"
+    local interactive_fix="$6"
 
-    [[ "${MH_USER_HC_INTERACTIVE_FIX}" == "yes" ]] || return 0
+    [[ "${interactive_fix}" == "yes" ]] || return 0
     echo "${reason}"
     if confirm "Set ${path} to ${owner}:${group} ${mode} now?"; then
         touch "${path}" || { health_fail "Could not create ${path}."; return 1; }
@@ -52,16 +54,17 @@ check_path() {
     local expected_owner="$4"
     local expected_group="$5"
     local reason="$6"
+    local interactive_fix="$7"
 
     if [[ "${type}" == "dir" && ! -d "${path}" ]]; then
         health_fail "Missing directory: ${path}"
-        maybe_fix_dir "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}"
+        maybe_fix_dir "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}" "${interactive_fix}"
         return 0
     fi
 
     if [[ "${type}" == "file" && ! -f "${path}" ]]; then
         health_warn "Missing file: ${path}"
-        maybe_fix_file "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}"
+        maybe_fix_file "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}" "${interactive_fix}"
         return 0
     fi
 
@@ -75,84 +78,83 @@ check_path() {
     else
         health_fail "${path} is ${actual_owner}:${actual_group} ${actual_mode}; expected ${expected_owner}:${expected_group} ${expected_mode}."
         if [[ "${type}" == "dir" ]]; then
-            maybe_fix_dir "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}"
+            maybe_fix_dir "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}" "${interactive_fix}"
         else
-            maybe_fix_file "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}"
+            maybe_fix_file "${path}" "${expected_mode}" "${expected_owner}" "${expected_group}" "${reason}" "${interactive_fix}"
         fi
     fi
 }
 
 main_user_health_check() {
-    MH_USER_HC_INTERACTIVE_FIX="no"
-    MH_USER_HC_TARGET_USER=""
-
+    local interactive_fix="no"
+    local target_user=""
     local arg
+    local home_dir shell_path home_owner ssh_dir auth_keys
+
     for arg in "$@"; do
         case "${arg}" in
-            --interactive-fix) MH_USER_HC_INTERACTIVE_FIX="yes" ;;
-            *) MH_USER_HC_TARGET_USER="${arg}" ;;
+            --interactive-fix) interactive_fix="yes" ;;
+            *) target_user="${arg}" ;;
         esac
     done
 
-    local home_dir shell_path home_owner ssh_dir auth_keys
+    if [[ -z "${target_user}" ]]; then
+        read -rp "Linux username to check: " target_user
+    fi
 
-if [[ -z "${MH_USER_HC_TARGET_USER}" ]]; then
-    read -rp "Linux username to check: " MH_USER_HC_TARGET_USER
-fi
+    validate_linux_username "${target_user}" || fail "Invalid Linux username: ${target_user}"
 
-validate_linux_username "${MH_USER_HC_TARGET_USER}" || fail "Invalid Linux username: ${MH_USER_HC_TARGET_USER}"
+    echo
+    info "Running user health check for ${target_user}."
+    if [[ "${interactive_fix}" == "yes" ]]; then
+        info "Interactive fixes are enabled for low-risk filesystem issues."
+    else
+        info "Report-only mode. Re-run with --interactive-fix to be prompted for safe repairs."
+    fi
+    echo
 
-echo
-info "Running user health check for ${MH_USER_HC_TARGET_USER}."
-if [[ "${MH_USER_HC_INTERACTIVE_FIX}" == "yes" ]]; then
-    info "Interactive fixes are enabled for low-risk filesystem issues."
-else
-    info "Report-only mode. Re-run with --interactive-fix to be prompted for safe repairs."
-fi
-echo
+    if ! linux_user_exists "${target_user}"; then
+        health_fail "Linux user does not exist: ${target_user}"
+        info "User health check complete: ${MH_USER_HC_PASS_COUNT} ok, ${MH_USER_HC_WARN_COUNT} warnings, ${MH_USER_HC_FAIL_COUNT} failures."
+        exit 1
+    fi
+    health_ok "Linux user exists: ${target_user}"
 
-if ! linux_user_exists "${MH_USER_HC_TARGET_USER}"; then
-    health_fail "Linux user does not exist: ${MH_USER_HC_TARGET_USER}"
+    home_dir="$(getent passwd "${target_user}" | cut -d: -f6)"
+    shell_path="$(getent passwd "${target_user}" | cut -d: -f7)"
+
+    if [[ -d "${home_dir}" ]]; then
+        health_ok "Home directory exists: ${home_dir}"
+    else
+        health_fail "Home directory is missing: ${home_dir}"
+    fi
+
+    home_owner="$(stat -c '%U' "${home_dir}" 2>/dev/null || true)"
+    if [[ "${home_owner}" == "${target_user}" ]]; then
+        health_ok "Home directory is owned by ${target_user}."
+    else
+        health_fail "Home directory owner is ${home_owner:-unknown}; expected ${target_user}."
+    fi
+
+    case "${shell_path}" in
+        /bin/bash|/usr/bin/bash|/bin/sh|/usr/bin/sh) health_ok "Login shell is conventional: ${shell_path}" ;;
+        *) health_warn "Login shell is unusual: ${shell_path}" ;;
+    esac
+
+    ssh_dir="${home_dir}/.ssh"
+    auth_keys="${ssh_dir}/authorized_keys"
+
+    check_path "${ssh_dir}" dir 700 "${target_user}" "${target_user}" ".ssh must not be accessible by other users; OpenSSH may reject loose permissions." "${interactive_fix}"
+    check_path "${auth_keys}" file 600 "${target_user}" "${target_user}" "authorized_keys should be readable only by the account owner." "${interactive_fix}"
+
+    if [[ -f "${auth_keys}" && -s "${auth_keys}" ]]; then
+        health_ok "authorized_keys contains at least one key."
+    elif [[ -f "${auth_keys}" ]]; then
+        health_warn "authorized_keys exists but is empty."
+    fi
+
+    echo
     info "User health check complete: ${MH_USER_HC_PASS_COUNT} ok, ${MH_USER_HC_WARN_COUNT} warnings, ${MH_USER_HC_FAIL_COUNT} failures."
-    exit 1
-fi
-health_ok "Linux user exists: ${MH_USER_HC_TARGET_USER}"
-
-home_dir="$(getent passwd "${MH_USER_HC_TARGET_USER}" | cut -d: -f6)"
-shell_path="$(getent passwd "${MH_USER_HC_TARGET_USER}" | cut -d: -f7)"
-
-if [[ -d "${home_dir}" ]]; then
-    health_ok "Home directory exists: ${home_dir}"
-else
-    health_fail "Home directory is missing: ${home_dir}"
-fi
-
-home_owner="$(stat -c '%U' "${home_dir}" 2>/dev/null || true)"
-if [[ "${home_owner}" == "${MH_USER_HC_TARGET_USER}" ]]; then
-    health_ok "Home directory is owned by ${MH_USER_HC_TARGET_USER}."
-else
-    health_fail "Home directory owner is ${home_owner:-unknown}; expected ${MH_USER_HC_TARGET_USER}."
-fi
-
-case "${shell_path}" in
-    /bin/bash|/usr/bin/bash|/bin/sh|/usr/bin/sh) health_ok "Login shell is conventional: ${shell_path}" ;;
-    *) health_warn "Login shell is unusual: ${shell_path}" ;;
-esac
-
-ssh_dir="${home_dir}/.ssh"
-auth_keys="${ssh_dir}/authorized_keys"
-
-check_path "${ssh_dir}" dir 700 "${MH_USER_HC_TARGET_USER}" "${MH_USER_HC_TARGET_USER}" ".ssh must not be accessible by other users; OpenSSH may reject loose permissions."
-check_path "${auth_keys}" file 600 "${MH_USER_HC_TARGET_USER}" "${MH_USER_HC_TARGET_USER}" "authorized_keys should be readable only by the account owner."
-
-if [[ -f "${auth_keys}" && -s "${auth_keys}" ]]; then
-    health_ok "authorized_keys contains at least one key."
-elif [[ -f "${auth_keys}" ]]; then
-    health_warn "authorized_keys exists but is empty."
-fi
-
-echo
-info "User health check complete: ${MH_USER_HC_PASS_COUNT} ok, ${MH_USER_HC_WARN_COUNT} warnings, ${MH_USER_HC_FAIL_COUNT} failures."
 
     if (( MH_USER_HC_FAIL_COUNT > 0 )); then
         exit 1
