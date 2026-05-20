@@ -3,4 +3,5 @@ logs/
 backups/
 ssl-certificates/
 mariadb/
+.state/
 *.log

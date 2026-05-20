@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
 ###############################################################################
-# SHARED CONFIGURATION
+# SHARED CONFIGURATION EXAMPLE
 #
+# Server Setup Toolkit Version: 0.1.0
+#
+# Copy this file to config.sh and edit config.sh for the target server:
+#
+#   cp config.example.sh config.sh
+#   nano config.sh
+#
+# config.sh is server-specific and should not be committed to Git.
 ###############################################################################
 
 SERVER_SETUP_TOOLKIT_VERSION="0.1.0"
 
-ADMIN_USER="mike"
-ADMIN_SSH_PUBLIC_KEY_FILE="/${ADMIN_USER}.pub"
+# Admin users are created/managed by scripts/user_admin.sh.
+# This group lets admin users maintain the toolkit repository without using sudo
+# for every Git/editing operation.
+SERVER_ADMIN_GROUP="server_admin"
 
 TIMEZONE="Europe/London"
 
@@ -24,6 +34,8 @@ SERVER_ADMIN_BACKUP_DIR="${SERVER_ADMIN_DIR}/backups"
 SERVER_ADMIN_SSL_DIR="${SERVER_ADMIN_DIR}/ssl-certificates"
 SERVER_ADMIN_DOCS_DIR="${SERVER_ADMIN_DIR}/docs"
 SERVER_ADMIN_MARIADB_DIR="${SERVER_ADMIN_DIR}/mariadb"
+SERVER_ADMIN_STATE_DIR="${SERVER_ADMIN_DIR}/.state"
+BASE_SYSTEM_COMPLETE_FILE="${SERVER_ADMIN_STATE_DIR}/base_system_complete"
 
 SURY_KEYRING="/usr/share/keyrings/debsuryorg-archive-keyring.gpg"
 SURY_LIST="/etc/apt/sources.list.d/php-sury.list"
