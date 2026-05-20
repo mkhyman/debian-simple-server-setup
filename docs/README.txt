@@ -5,17 +5,17 @@ This toolkit is intended for Debian 13 web hosting.
 
 Main admin directory:
 
-  /root/server-admin
+  /server-admin
 
 Recommended layout:
 
-  /root/server-admin/scripts       extracted setup scripts
-  /root/server-admin/logs          script logs
-  /root/server-admin/backups       backups made before overwriting managed files
-  /root/server-admin/ssl-certificates
+  /server-admin/scripts       extracted setup scripts
+  /server-admin/logs          script logs
+  /server-admin/backups       backups made before overwriting managed files
+  /server-admin/ssl-certificates
                                   authoritative paid SSL certificate storage
-  /root/server-admin/mariadb       notes about MariaDB TLS locations
-  /root/server-admin/docs          human-readable notes
+  /server-admin/mariadb       notes about MariaDB TLS locations
+  /server-admin/docs          human-readable notes
 
 Naming convention:
 
@@ -42,4 +42,4 @@ Run menu:
 
 Logs:
 
-  /root/server-admin/logs/<script_name>_<timestamp>.log
+  /server-admin/logs/<script_name>_<timestamp>.log

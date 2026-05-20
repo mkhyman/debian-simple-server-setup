@@ -41,7 +41,7 @@ There is no bundle, extractor, or build stage in the active workflow.
 The repository itself is normally cloned to:
 
 ```text
-/root/server-admin/
+/server-admin/
 ```
 
 Typical first-use flow:
@@ -49,8 +49,8 @@ Typical first-use flow:
 ```bash
 apt update
 apt install -y git
-git clone <repo-url> /root/server-admin
-cd /root/server-admin
+git clone <repo-url> /server-admin
+cd /server-admin
 
 cp config.example.sh config.sh
 nano config.sh
@@ -58,7 +58,7 @@ nano config.sh
 sudo ./run_server_setup.sh
 ```
 
-The path `/root/server-admin` is the recommended deployment location, but scripts should still resolve repository files relative to the repository root rather than assuming a fixed absolute path.
+The path `/server-admin` is the recommended deployment location, but scripts should still resolve repository files relative to the repository root rather than assuming a fixed absolute path.
 
 `config.example.sh` is tracked in Git.  
 `config.sh` is local to each server and must not be committed.
@@ -67,12 +67,12 @@ The path `/root/server-admin` is the recommended deployment location, but script
 
 ## 3. Repository layout
 
-All repository-controlled paths should use lowercase names and underscores, except where a Git repository/root directory name naturally contains a hyphen.
+All repository-controlled paths should use lowercase names and underscores, except where a Git repository directory name naturally contains a hyphen.
 
 Authoritative repository layout:
 
 ```text
-/root/server-admin/
+/server-admin/
 ├── .gitignore
 ├── config.example.sh
 ├── config.sh                 # local only, ignored by Git
@@ -97,8 +97,8 @@ Authoritative repository layout:
 
 Important distinction:
 
-- `/root/server-admin` is the repository root and overall toolkit/admin directory.
-- `/root/server-admin/scripts` is only a subfolder inside the repo containing the core and site operational scripts.
+- `/server-admin` is the repository root and overall toolkit/admin directory.
+- `/server-admin/scripts` is only a subfolder inside the repo containing the core and site operational scripts.
 - `run_server_setup.sh` lives at the repository root, not inside `scripts/`.
 
 There should be no required files named:
@@ -136,7 +136,7 @@ The toolkit must not include:
 Primary runtime admin/repository directory:
 
 ```text
-/root/server-admin/
+/server-admin/
 ```
 
 This directory name may contain a hyphen because Git repository names commonly do. That is accepted as an external naming idiosyncrasy.
@@ -144,7 +144,7 @@ This directory name may contain a hyphen because Git repository names commonly d
 Expected runtime layout:
 
 ```text
-/root/server-admin/
+/server-admin/
 ├── config.example.sh
 ├── config.sh
 ├── run_server_setup.sh
@@ -189,7 +189,7 @@ Authoritative paid SSL certificate storage.
 Example:
 
 ```text
-/root/server-admin/ssl-certificates/example.com/
+/server-admin/ssl-certificates/example.com/
 ├── cert.pem
 ├── privkey.pem
 ├── chain.pem
@@ -208,7 +208,7 @@ Backups use flattened path names and timestamps.
 Example:
 
 ```text
-/root/server-admin/backups/etc-apache2-sites-available-shop.example.com.conf_2026-05-18_150000.bak
+/server-admin/backups/etc-apache2-sites-available-shop.example.com.conf_2026-05-18_150000.bak
 ```
 
 #### `mariadb/`
@@ -260,7 +260,7 @@ MariaDB TLS config:
 Paid website SSL certificates are authoritative under:
 
 ```text
-/root/server-admin/ssl-certificates/
+/server-admin/ssl-certificates/
 ```
 
 because these are human-managed website administration files and Apache can reference them directly.
@@ -274,7 +274,7 @@ Use lowercase and underscores for repository-controlled filenames.
 The accepted exception is the runtime/repository root directory name:
 
 ```text
-/root/server-admin/
+/server-admin/
 ```
 
 because Git repository names often use hyphens.
@@ -367,7 +367,7 @@ Create it with:
 SERVER_SETUP_TOOLKIT_VERSION="0.1.0"
 
 ADMIN_USER="..."
-ADMIN_SSH_PUBLIC_KEY_FILE="/root/${ADMIN_USER}.pub"
+ADMIN_SSH_PUBLIC_KEY_FILE="/${ADMIN_USER}.pub"
 
 TIMEZONE="Europe/London"
 
@@ -377,7 +377,7 @@ MARIADB_PORT="3306"
 PHP_VERSIONS=("8.4" "7.4")
 DEFAULT_PHP_VERSION="8.4"
 
-SERVER_ADMIN_DIR="/root/server-admin"
+SERVER_ADMIN_DIR="/server-admin"
 SERVER_ADMIN_SCRIPTS_DIR="${SERVER_ADMIN_DIR}/scripts"
 SERVER_ADMIN_LOG_DIR="${SERVER_ADMIN_DIR}/logs"
 SERVER_ADMIN_BACKUP_DIR="${SERVER_ADMIN_DIR}/backups"
@@ -860,7 +860,7 @@ MariaDB TLS runtime files live under:
 /etc/mysql/ssl/
 ```
 
-No duplicate MariaDB cert copies under `/root/server-admin`.
+No duplicate MariaDB cert copies under `/server-admin`.
 
 ---
 
@@ -969,5 +969,5 @@ Because the toolkit moved from bundle/extractor deployment to Git deployment, th
 - no generated docs should instruct bundle extraction.
 - `.gitignore` must ignore `config.sh`.
 - deployment docs must say to copy `config.example.sh` to `config.sh`.
-- `SERVER_ADMIN_DIR` should default to `/root/server-admin`.
-- operational scripts should not assume the repo was cloned to `/root/server-admin`; only runtime storage defaults should use that path.
+- `SERVER_ADMIN_DIR` should default to `/server-admin`.
+- operational scripts should not assume the repo was cloned to `/server-admin`; only runtime storage defaults should use that path.

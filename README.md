@@ -62,8 +62,8 @@ Clone the repository:
 ```bash
 apt update
 apt install -y git
-git clone <repo-url> /root/server-admin
-cd /root/server-admin
+git clone <repo-url> /server-admin
+cd /server-admin
 ```
 
 Create local config:
@@ -138,13 +138,13 @@ certificate SAN:    *.example.com
 By default, runtime/admin files live under:
 
 ```text
-/root/server-admin/
+/server-admin/
 ```
 
 Expected runtime folders:
 
 ```text
-/root/server-admin/
+/server-admin/
 ├── logs/
 ├── ssl-certificates/
 ├── backups/
@@ -155,7 +155,7 @@ Expected runtime folders:
 The repository itself also normally lives at:
 
 ```text
-/root/server-admin/
+/server-admin/
 ```
 
 The toolkit should still resolve its own files relative to the repository root, not by assuming an absolute clone path.
@@ -167,7 +167,7 @@ The toolkit should still resolve its own files relative to the repository root, 
 Script logs are written to:
 
 ```text
-/root/server-admin/logs/
+/server-admin/logs/
 ```
 
 Log names look like:
@@ -195,13 +195,13 @@ sudo ./scripts/03_core_webstack_apache_php_mariadb_redis.sh --verbose
 Paid website certificates are authoritative under:
 
 ```text
-/root/server-admin/ssl-certificates/
+/server-admin/ssl-certificates/
 ```
 
 Example:
 
 ```text
-/root/server-admin/ssl-certificates/example.com/
+/server-admin/ssl-certificates/example.com/
 ├── cert.pem
 ├── privkey.pem
 ├── chain.pem

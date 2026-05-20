@@ -6,7 +6,7 @@ require_root
 # IMPORT PAID SSL CERTIFICATE
 #
 # Normalises paid certificate provider output into the authoritative certificate
-# directory under /root/server-admin/ssl-certificates.
+# directory under /server-admin/ssl-certificates.
 #
 # This script does not create self-signed/snakeoil website certificates.
 ###############################################################################
