@@ -123,6 +123,38 @@ That way, if Debian changes service management details later, there is one place
 to adapt the project.
 
 
+
+Single responsibility
+---------------------
+
+Keep state checks, presentation and repair actions separate where practical.
+
+A function that checks a fact should normally return success or failure, and
+should not also decide what to print, increment counters, prompt the user or
+change the system.
+
+For example, a low-level check can answer:
+
+    is the service active?
+
+The calling code should decide whether that becomes:
+
+    - an OK message
+    - a warning
+    - a failure
+    - an interactive repair offer
+    - an immediate exit
+
+Presentation helpers such as health_ok, health_warn and health_fail are allowed
+to print messages and update counters because that is their explicit purpose.
+
+Repair helpers may prompt and change the system, but their names should make
+that responsibility obvious.
+
+This separation keeps checks reusable and avoids hidden side effects. In Bash,
+where there are no classes or real namespaces, this matters more than it would in
+a more structured language.
+
 Abstraction philosophy
 ----------------------
 
