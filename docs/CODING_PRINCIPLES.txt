@@ -1,0 +1,259 @@
+Coding principles
+=================
+
+Purpose
+-------
+
+This project exists to rebuild a personal Debian PHP/Laravel hosting server
+quickly, calmly and repeatably from a blank machine.
+
+It is intentionally opinionated. It is not trying to become a generic hosting
+control panel, a deployment platform or a universal provisioning framework.
+
+Prefer simple, boring and inspectable code over clever abstraction.
+
+
+Scope
+-----
+
+The project is Debian-first and PHP-first.
+
+The expected use case is personal hosting with a small number of sites, mostly
+Laravel, administered by someone who is comfortable reading shell scripts and
+server configuration files.
+
+Interactive operation is the default. Non-interactive provisioning, import/export
+systems and full control-panel behaviour can be added later only if they become
+clearly necessary.
+
+
+Naming conventions
+------------------
+
+Function names use lowercase words separated by underscores.
+
+Examples:
+
+    reload_apache_safely
+    validate_sshd_config
+    write_managed_file
+
+Local variables use lowercase words separated by underscores.
+
+Examples:
+
+    local site_user
+    local interactive_fix
+    local expected_mode
+
+Script entrypoint functions should be namespaced to the script purpose. Do not
+use a plain main function, because scripts may be read together or sourced during
+maintenance.
+
+Examples:
+
+    main_core_health_check
+    main_user_health_check
+    main_website_health_check
+
+Constants use uppercase words separated by underscores.
+
+Examples:
+
+    SERVER_ADMIN_DIR
+    PHP_VERSIONS
+
+Script-global mutable variables should be avoided. If they are justified, they
+must be deliberately obvious:
+
+    - uppercase
+    - prefixed with MH_
+    - narrowly scoped to the script's purpose
+
+Examples:
+
+    MH_WEBSITE_HC_PASS_COUNT
+    MH_WEBSITE_HC_WARN_COUNT
+    MH_WEBSITE_HC_FAIL_COUNT
+
+This is a Bash project, so visibility matters. Future maintainers should be able
+to spot wider-scope state immediately.
+
+
+Variable scope
+--------------
+
+Use local variables inside functions wherever possible.
+
+Avoid global variables unless they make the script materially simpler and easier
+to maintain. Bash does not protect scope well, so accidental globals are a common
+source of strange bugs.
+
+If a global is used, make it obvious and intentional with the MH_ uppercase
+convention described above.
+
+
+Function design
+---------------
+
+Use functions for behaviour that is repeated, risky, or likely to change between
+Debian releases.
+
+Good candidates for functions include:
+
+    - service reloads and restarts
+    - configuration validation
+    - managed file writing
+    - permission setup
+    - user and path helpers
+    - certificate helpers
+
+The goal is not to abstract everything. The goal is to give important behaviour
+one clear maintenance point.
+
+Prefer this:
+
+    reload_apache_safely
+
+rather than repeating this everywhere:
+
+    apachectl configtest && systemctl reload apache2
+
+That way, if Debian changes service management details later, there is one place
+to adapt the project.
+
+
+Abstraction philosophy
+----------------------
+
+Abstraction should make the code safer or easier to read.
+
+Do not add abstraction just to make the code look more engineered. In shell
+scripts, cleverness ages badly.
+
+Prefer direct, readable code unless a helper function removes duplication,
+centralises operational risk, or makes the caller's intent clearer.
+
+
+Comments
+--------
+
+Comments should explain why something is being done, not merely repeat what the
+next command already says.
+
+Poor comment:
+
+    # Reload Apache.
+    reload_apache_safely
+
+Better comment:
+
+    # Validate before reloading so one bad vhost does not take every site down.
+    reload_apache_safely
+
+Assume the reader can understand ordinary shell commands. Use comments for the
+operational reason, security reason, historical reason or maintenance trap.
+
+
+Failure handling
+----------------
+
+Prefer clear failure messages over generic errors.
+
+A good failure message should say:
+
+    - what failed
+    - what was not done
+    - what the likely next action is, where practical
+
+Example:
+
+    Apache config validation failed. Apache was not reloaded.
+
+Do not continue after a failure if the following steps could make the system less
+safe, less reachable or harder to recover.
+
+For diagnostic scripts, collect as much useful evidence as possible. For setup
+scripts, fail early when continuing would be risky.
+
+
+Managed files
+-------------
+
+Prefer managed fragments over editing distribution-owned configuration files.
+
+For example, prefer this:
+
+    /etc/ssh/sshd_config.d/server-admin.conf
+
+rather than repeatedly editing this:
+
+    /etc/ssh/sshd_config
+
+If a distribution-owned file must be altered to enable managed fragments, log an
+INFO message and back it up first.
+
+Managed-file writers should avoid unnecessary changes, show the user what is
+being managed, and back up existing files before replacement.
+
+
+Health checks
+-------------
+
+Health checks are diagnostic first.
+
+By default they should report only. They should not silently change the server.
+
+A health check may support:
+
+    --interactive-fix
+
+for low-risk repairs such as known directory modes, ownership, ACLs or SSH file
+permissions. It should explain the current state, the recommended state and why
+the fix is being offered.
+
+Do not use health checks for high-risk changes such as rewriting SSH policy,
+replacing certificates, changing database credentials or deleting files. Those
+belong in explicit setup scripts.
+
+
+Security philosophy
+-------------------
+
+Use least privilege where it remains understandable.
+
+For websites, prefer:
+
+    - one Linux user per site
+    - one PHP-FPM pool per site
+    - one database user per site
+    - no shared writable directories between sites
+    - Apache able to read only what it needs
+    - PHP running as the site user, not as Apache
+
+Apache may still run as the normal Apache user. The stronger boundary for PHP
+sites is the PHP-FPM pool user plus filesystem and database permissions.
+
+Legacy PHP versions may be supported when needed, but they should not be allowed
+to blur site boundaries or require broad shared write access.
+
+
+Operational style
+-----------------
+
+The scripts should tell the user what they are doing with INFO messages when the
+action is important or surprising.
+
+Avoid silent magic.
+
+Avoid pretending a backup of a configuration file is a full disaster-recovery
+backup. Config backups help local rollback. Real disaster recovery also needs
+site files, .env files, uploaded media, database dumps and certificates where
+those cannot simply be reissued.
+
+
+General principle
+-----------------
+
+If future-you reads this repository at 2am after a server failure, the code should
+be boring, explicit and unsurprising.
