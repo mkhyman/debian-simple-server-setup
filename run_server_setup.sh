@@ -9,14 +9,17 @@ menu_entries=(
     "core|core_webstack_apache_php_mariadb_redis.sh|Install Apache, PHP-FPM, MariaDB TLS and Redis"
     "core|core_composer.sh|Install Composer"
     "core|core_disable_root_ssh.sh|Disable root SSH login"
+    "core|core_health_check.sh|Run core system health check"
 
     "user|user_admin.sh|Create/update admin user"
     "user|user_website.sh|Create/update website user"
     "user|user_manage_ssh_keys.sh|Manage SSH keys for a Linux user"
+    "user|user_health_check.sh|Run Linux user health check"
 
     "website|website_import_paid_certificate.sh|Import paid SSL certificate"
     "website|website_create_https_vhost.sh|Create HTTPS-only Apache vhost"
     "website|website_create_mariadb_user.sh|Create MariaDB database/user requiring SSL"
+    "website|website_health_check.sh|Run website health check"
 )
 
 run_selected_script() {
