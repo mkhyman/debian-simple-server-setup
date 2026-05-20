@@ -5,29 +5,24 @@ source "${repo_root}/lib/common.sh" "$@"
 require_root
 require_base_system_complete
 
-INTERACTIVE_FIX="no"
-if [[ "${1:-}" == "--interactive-fix" ]]; then
-    INTERACTIVE_FIX="yes"
-fi
-
-PASS_COUNT=0
-WARN_COUNT=0
-FAIL_COUNT=0
+MH_CORE_HC_PASS_COUNT=0
+MH_CORE_HC_WARN_COUNT=0
+MH_CORE_HC_FAIL_COUNT=0
 
 health_ok() {
     ok "$*"
-    PASS_COUNT=$((PASS_COUNT+1))
+    MH_CORE_HC_PASS_COUNT=$((MH_CORE_HC_PASS_COUNT+1))
 }
 
 health_warn() {
     warn "$*"
-    WARN_COUNT=$((WARN_COUNT+1))
+    MH_CORE_HC_WARN_COUNT=$((MH_CORE_HC_WARN_COUNT+1))
 }
 
 health_fail() {
     echo "[FAIL] $*"
     echo "[FAIL] $*" >>"${LOG_FILE}"
-    FAIL_COUNT=$((FAIL_COUNT+1))
+    MH_CORE_HC_FAIL_COUNT=$((MH_CORE_HC_FAIL_COUNT+1))
 }
 
 check_command() {
@@ -74,7 +69,7 @@ check_directory_mode_owner() {
     else
         health_fail "${path} is ${actual_owner}:${actual_group} ${actual_mode}; expected ${expected_owner}:${expected_group} ${expected_mode}."
 
-        if [[ "${INTERACTIVE_FIX}" == "yes" ]]; then
+        if [[ "${MH_CORE_HC_INTERACTIVE_FIX}" == "yes" ]]; then
             echo "For security, this directory should match the toolkit's expected ownership and mode."
             if confirm "Set ${path} to ${expected_owner}:${expected_group} ${expected_mode} now?"; then
                 chown "${expected_owner}:${expected_group}" "${path}" || health_fail "Could not chown ${path}."
@@ -105,9 +100,17 @@ check_disk_space() {
     fi
 }
 
+main_core_health_check() {
+    MH_CORE_HC_INTERACTIVE_FIX="no"
+    if [[ "${1:-}" == "--interactive-fix" ]]; then
+        MH_CORE_HC_INTERACTIVE_FIX="yes"
+    fi
+
+    local php_version
+
 echo
 info "Running core system health check."
-if [[ "${INTERACTIVE_FIX}" == "yes" ]]; then
+if [[ "${MH_CORE_HC_INTERACTIVE_FIX}" == "yes" ]]; then
     info "Interactive fixes are enabled for low-risk filesystem issues."
 else
     info "Report-only mode. Re-run with --interactive-fix to be prompted for safe repairs."
@@ -163,8 +166,11 @@ check_disk_space "/"
 check_disk_space "${SERVER_ADMIN_DIR}"
 
 echo
-info "Core health check complete: ${PASS_COUNT} ok, ${WARN_COUNT} warnings, ${FAIL_COUNT} failures."
+info "Core health check complete: ${MH_CORE_HC_PASS_COUNT} ok, ${MH_CORE_HC_WARN_COUNT} warnings, ${MH_CORE_HC_FAIL_COUNT} failures."
 
-if (( FAIL_COUNT > 0 )); then
-    exit 1
-fi
+    if (( MH_CORE_HC_FAIL_COUNT > 0 )); then
+        exit 1
+    fi
+}
+
+main_core_health_check "$@"

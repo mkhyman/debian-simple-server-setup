@@ -5,23 +5,13 @@ source "${repo_root}/lib/common.sh" "$@"
 require_root
 require_base_system_complete
 
-INTERACTIVE_FIX="no"
-TARGET_USER=""
+MH_USER_HC_PASS_COUNT=0
+MH_USER_HC_WARN_COUNT=0
+MH_USER_HC_FAIL_COUNT=0
 
-for arg in "$@"; do
-    case "${arg}" in
-        --interactive-fix) INTERACTIVE_FIX="yes" ;;
-        *) TARGET_USER="${arg}" ;;
-    esac
-done
-
-PASS_COUNT=0
-WARN_COUNT=0
-FAIL_COUNT=0
-
-health_ok() { ok "$*"; PASS_COUNT=$((PASS_COUNT+1)); }
-health_warn() { warn "$*"; WARN_COUNT=$((WARN_COUNT+1)); }
-health_fail() { echo "[FAIL] $*"; echo "[FAIL] $*" >>"${LOG_FILE}"; FAIL_COUNT=$((FAIL_COUNT+1)); }
+health_ok() { ok "$*"; MH_USER_HC_PASS_COUNT=$((MH_USER_HC_PASS_COUNT+1)); }
+health_warn() { warn "$*"; MH_USER_HC_WARN_COUNT=$((MH_USER_HC_WARN_COUNT+1)); }
+health_fail() { echo "[FAIL] $*"; echo "[FAIL] $*" >>"${LOG_FILE}"; MH_USER_HC_FAIL_COUNT=$((MH_USER_HC_FAIL_COUNT+1)); }
 
 maybe_fix_dir() {
     local path="$1"
@@ -30,7 +20,7 @@ maybe_fix_dir() {
     local group="$4"
     local reason="$5"
 
-    [[ "${INTERACTIVE_FIX}" == "yes" ]] || return 0
+    [[ "${MH_USER_HC_INTERACTIVE_FIX}" == "yes" ]] || return 0
     echo "${reason}"
     if confirm "Set ${path} to ${owner}:${group} ${mode} now?"; then
         install -d -m "${mode}" -o "${owner}" -g "${group}" "${path}" || { health_fail "Could not fix ${path}."; return 1; }
@@ -45,7 +35,7 @@ maybe_fix_file() {
     local group="$4"
     local reason="$5"
 
-    [[ "${INTERACTIVE_FIX}" == "yes" ]] || return 0
+    [[ "${MH_USER_HC_INTERACTIVE_FIX}" == "yes" ]] || return 0
     echo "${reason}"
     if confirm "Set ${path} to ${owner}:${group} ${mode} now?"; then
         touch "${path}" || { health_fail "Could not create ${path}."; return 1; }
@@ -92,30 +82,44 @@ check_path() {
     fi
 }
 
-if [[ -z "${TARGET_USER}" ]]; then
-    read -rp "Linux username to check: " TARGET_USER
+main_user_health_check() {
+    MH_USER_HC_INTERACTIVE_FIX="no"
+    MH_USER_HC_TARGET_USER=""
+
+    local arg
+    for arg in "$@"; do
+        case "${arg}" in
+            --interactive-fix) MH_USER_HC_INTERACTIVE_FIX="yes" ;;
+            *) MH_USER_HC_TARGET_USER="${arg}" ;;
+        esac
+    done
+
+    local home_dir shell_path home_owner ssh_dir auth_keys
+
+if [[ -z "${MH_USER_HC_TARGET_USER}" ]]; then
+    read -rp "Linux username to check: " MH_USER_HC_TARGET_USER
 fi
 
-validate_linux_username "${TARGET_USER}" || fail "Invalid Linux username: ${TARGET_USER}"
+validate_linux_username "${MH_USER_HC_TARGET_USER}" || fail "Invalid Linux username: ${MH_USER_HC_TARGET_USER}"
 
 echo
-info "Running user health check for ${TARGET_USER}."
-if [[ "${INTERACTIVE_FIX}" == "yes" ]]; then
+info "Running user health check for ${MH_USER_HC_TARGET_USER}."
+if [[ "${MH_USER_HC_INTERACTIVE_FIX}" == "yes" ]]; then
     info "Interactive fixes are enabled for low-risk filesystem issues."
 else
     info "Report-only mode. Re-run with --interactive-fix to be prompted for safe repairs."
 fi
 echo
 
-if ! linux_user_exists "${TARGET_USER}"; then
-    health_fail "Linux user does not exist: ${TARGET_USER}"
-    info "User health check complete: ${PASS_COUNT} ok, ${WARN_COUNT} warnings, ${FAIL_COUNT} failures."
+if ! linux_user_exists "${MH_USER_HC_TARGET_USER}"; then
+    health_fail "Linux user does not exist: ${MH_USER_HC_TARGET_USER}"
+    info "User health check complete: ${MH_USER_HC_PASS_COUNT} ok, ${MH_USER_HC_WARN_COUNT} warnings, ${MH_USER_HC_FAIL_COUNT} failures."
     exit 1
 fi
-health_ok "Linux user exists: ${TARGET_USER}"
+health_ok "Linux user exists: ${MH_USER_HC_TARGET_USER}"
 
-home_dir="$(getent passwd "${TARGET_USER}" | cut -d: -f6)"
-shell_path="$(getent passwd "${TARGET_USER}" | cut -d: -f7)"
+home_dir="$(getent passwd "${MH_USER_HC_TARGET_USER}" | cut -d: -f6)"
+shell_path="$(getent passwd "${MH_USER_HC_TARGET_USER}" | cut -d: -f7)"
 
 if [[ -d "${home_dir}" ]]; then
     health_ok "Home directory exists: ${home_dir}"
@@ -124,10 +128,10 @@ else
 fi
 
 home_owner="$(stat -c '%U' "${home_dir}" 2>/dev/null || true)"
-if [[ "${home_owner}" == "${TARGET_USER}" ]]; then
-    health_ok "Home directory is owned by ${TARGET_USER}."
+if [[ "${home_owner}" == "${MH_USER_HC_TARGET_USER}" ]]; then
+    health_ok "Home directory is owned by ${MH_USER_HC_TARGET_USER}."
 else
-    health_fail "Home directory owner is ${home_owner:-unknown}; expected ${TARGET_USER}."
+    health_fail "Home directory owner is ${home_owner:-unknown}; expected ${MH_USER_HC_TARGET_USER}."
 fi
 
 case "${shell_path}" in
@@ -138,8 +142,8 @@ esac
 ssh_dir="${home_dir}/.ssh"
 auth_keys="${ssh_dir}/authorized_keys"
 
-check_path "${ssh_dir}" dir 700 "${TARGET_USER}" "${TARGET_USER}" ".ssh must not be accessible by other users; OpenSSH may reject loose permissions."
-check_path "${auth_keys}" file 600 "${TARGET_USER}" "${TARGET_USER}" "authorized_keys should be readable only by the account owner."
+check_path "${ssh_dir}" dir 700 "${MH_USER_HC_TARGET_USER}" "${MH_USER_HC_TARGET_USER}" ".ssh must not be accessible by other users; OpenSSH may reject loose permissions."
+check_path "${auth_keys}" file 600 "${MH_USER_HC_TARGET_USER}" "${MH_USER_HC_TARGET_USER}" "authorized_keys should be readable only by the account owner."
 
 if [[ -f "${auth_keys}" && -s "${auth_keys}" ]]; then
     health_ok "authorized_keys contains at least one key."
@@ -148,8 +152,11 @@ elif [[ -f "${auth_keys}" ]]; then
 fi
 
 echo
-info "User health check complete: ${PASS_COUNT} ok, ${WARN_COUNT} warnings, ${FAIL_COUNT} failures."
+info "User health check complete: ${MH_USER_HC_PASS_COUNT} ok, ${MH_USER_HC_WARN_COUNT} warnings, ${MH_USER_HC_FAIL_COUNT} failures."
 
-if (( FAIL_COUNT > 0 )); then
-    exit 1
-fi
+    if (( MH_USER_HC_FAIL_COUNT > 0 )); then
+        exit 1
+    fi
+}
+
+main_user_health_check "$@"

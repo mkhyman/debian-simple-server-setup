@@ -5,23 +5,13 @@ source "${repo_root}/lib/common.sh" "$@"
 require_root
 require_base_system_complete
 
-INTERACTIVE_FIX="no"
-SITE_USER=""
+MH_WEBSITE_HC_PASS_COUNT=0
+MH_WEBSITE_HC_WARN_COUNT=0
+MH_WEBSITE_HC_FAIL_COUNT=0
 
-for arg in "$@"; do
-    case "${arg}" in
-        --interactive-fix) INTERACTIVE_FIX="yes" ;;
-        *) SITE_USER="${arg}" ;;
-    esac
-done
-
-PASS_COUNT=0
-WARN_COUNT=0
-FAIL_COUNT=0
-
-health_ok() { ok "$*"; PASS_COUNT=$((PASS_COUNT+1)); }
-health_warn() { warn "$*"; WARN_COUNT=$((WARN_COUNT+1)); }
-health_fail() { echo "[FAIL] $*"; echo "[FAIL] $*" >>"${LOG_FILE}"; FAIL_COUNT=$((FAIL_COUNT+1)); }
+health_ok() { ok "$*"; MH_WEBSITE_HC_PASS_COUNT=$((MH_WEBSITE_HC_PASS_COUNT+1)); }
+health_warn() { warn "$*"; MH_WEBSITE_HC_WARN_COUNT=$((MH_WEBSITE_HC_WARN_COUNT+1)); }
+health_fail() { echo "[FAIL] $*"; echo "[FAIL] $*" >>"${LOG_FILE}"; MH_WEBSITE_HC_FAIL_COUNT=$((MH_WEBSITE_HC_FAIL_COUNT+1)); }
 
 maybe_fix_dir() {
     local path="$1"
@@ -30,7 +20,7 @@ maybe_fix_dir() {
     local group="$4"
     local reason="$5"
 
-    [[ "${INTERACTIVE_FIX}" == "yes" ]] || return 0
+    [[ "${MH_WEBSITE_HC_INTERACTIVE_FIX}" == "yes" ]] || return 0
     echo "${reason}"
     if confirm "Set ${path} to ${owner}:${group} ${mode} now?"; then
         install -d -m "${mode}" -o "${owner}" -g "${group}" "${path}" || { health_fail "Could not fix ${path}."; return 1; }
@@ -45,7 +35,7 @@ maybe_fix_file_mode_owner() {
     local group="$4"
     local reason="$5"
 
-    [[ "${INTERACTIVE_FIX}" == "yes" ]] || return 0
+    [[ "${MH_WEBSITE_HC_INTERACTIVE_FIX}" == "yes" ]] || return 0
     [[ -f "${path}" ]] || return 0
     echo "${reason}"
     if confirm "Set ${path} to ${owner}:${group} ${mode} now?"; then
@@ -95,11 +85,11 @@ check_acl_contains() {
         health_ok "${description}"
     else
         health_fail "Missing ACL: ${description}"
-        if [[ "${INTERACTIVE_FIX}" == "yes" ]]; then
+        if [[ "${MH_WEBSITE_HC_INTERACTIVE_FIX}" == "yes" ]]; then
             echo "Apache should receive only the access it needs while PHP runs as the site user."
-            if confirm "Re-apply toolkit ACLs for ${SITE_USER}?"; then
-                ensure_website_acls "${SITE_USER}" "${IS_LARAVEL}" || health_fail "Could not re-apply website ACLs."
-                health_ok "Re-applied website ACLs for ${SITE_USER}."
+            if confirm "Re-apply toolkit ACLs for ${MH_WEBSITE_HC_SITE_USER}?"; then
+                ensure_website_acls "${MH_WEBSITE_HC_SITE_USER}" "${MH_WEBSITE_HC_IS_LARAVEL}" || health_fail "Could not re-apply website ACLs."
+                health_ok "Re-applied website ACLs for ${MH_WEBSITE_HC_SITE_USER}."
             fi
         fi
     fi
@@ -120,18 +110,34 @@ check_file_not_world_readable() {
         health_ok "${path} is not world-readable."
     else
         health_fail "${path} is ${owner}:${group} ${mode}; it should not be world-readable."
-        maybe_fix_file_mode_owner "${path}" 600 "${SITE_USER}" "${SITE_USER}" ".env often contains secrets, so other local users should not be able to read it."
+        maybe_fix_file_mode_owner "${path}" 600 "${MH_WEBSITE_HC_SITE_USER}" "${MH_WEBSITE_HC_SITE_USER}" ".env often contains secrets, so other local users should not be able to read it."
     fi
 }
 
-if [[ -z "${SITE_USER}" ]]; then
-    read -rp "Linux site username to check: " SITE_USER
+main_website_health_check() {
+    MH_WEBSITE_HC_INTERACTIVE_FIX="no"
+    MH_WEBSITE_HC_SITE_USER=""
+
+    local arg
+    for arg in "$@"; do
+        case "${arg}" in
+            --interactive-fix) MH_WEBSITE_HC_INTERACTIVE_FIX="yes" ;;
+            *) MH_WEBSITE_HC_SITE_USER="${arg}" ;;
+        esac
+    done
+
+    local site_home site_root detected_laravel docroot logs tmpdir
+    local php_version candidate pool_file
+    local -a pool_files
+
+if [[ -z "${MH_WEBSITE_HC_SITE_USER}" ]]; then
+    read -rp "Linux site username to check: " MH_WEBSITE_HC_SITE_USER
 fi
 
-validate_linux_username "${SITE_USER}" || fail "Invalid Linux username: ${SITE_USER}"
+validate_linux_username "${MH_WEBSITE_HC_SITE_USER}" || fail "Invalid Linux username: ${MH_WEBSITE_HC_SITE_USER}"
 
-site_home="$(site_home_for_user "${SITE_USER}")"
-site_root="$(site_root_for_user "${SITE_USER}")"
+site_home="$(site_home_for_user "${MH_WEBSITE_HC_SITE_USER}")"
+site_root="$(site_root_for_user "${MH_WEBSITE_HC_SITE_USER}")"
 
 if [[ -f "${site_root}/artisan" || -d "${site_root}/bootstrap/cache" || -d "${site_root}/storage" ]]; then
     detected_laravel="Y"
@@ -139,38 +145,38 @@ else
     detected_laravel="N"
 fi
 
-read -rp "Treat as Laravel site? [${detected_laravel}]: " IS_LARAVEL
-IS_LARAVEL="${IS_LARAVEL:-${detected_laravel}}"
+read -rp "Treat as Laravel site? [${detected_laravel}]: " MH_WEBSITE_HC_IS_LARAVEL
+MH_WEBSITE_HC_IS_LARAVEL="${MH_WEBSITE_HC_IS_LARAVEL:-${detected_laravel}}"
 
-docroot="$(site_docroot_for_user "${SITE_USER}" "${IS_LARAVEL}")"
+docroot="$(site_docroot_for_user "${MH_WEBSITE_HC_SITE_USER}" "${MH_WEBSITE_HC_IS_LARAVEL}")"
 logs="${site_home}/${SITE_LOG_DIR}"
 tmpdir="${site_home}/${SITE_TMP_DIR}"
 
 echo
-info "Running website health check for ${SITE_USER}."
-if [[ "${INTERACTIVE_FIX}" == "yes" ]]; then
+info "Running website health check for ${MH_WEBSITE_HC_SITE_USER}."
+if [[ "${MH_WEBSITE_HC_INTERACTIVE_FIX}" == "yes" ]]; then
     info "Interactive fixes are enabled for low-risk filesystem and ACL issues."
 else
     info "Report-only mode. Re-run with --interactive-fix to be prompted for safe repairs."
 fi
 echo
 
-if ! linux_user_exists "${SITE_USER}"; then
-    health_fail "Linux site user does not exist: ${SITE_USER}"
-    info "Website health check complete: ${PASS_COUNT} ok, ${WARN_COUNT} warnings, ${FAIL_COUNT} failures."
+if ! linux_user_exists "${MH_WEBSITE_HC_SITE_USER}"; then
+    health_fail "Linux site user does not exist: ${MH_WEBSITE_HC_SITE_USER}"
+    info "Website health check complete: ${MH_WEBSITE_HC_PASS_COUNT} ok, ${MH_WEBSITE_HC_WARN_COUNT} warnings, ${MH_WEBSITE_HC_FAIL_COUNT} failures."
     exit 1
 fi
-health_ok "Linux site user exists: ${SITE_USER}"
+health_ok "Linux site user exists: ${MH_WEBSITE_HC_SITE_USER}"
 
-check_dir "${site_home}" 750 "${SITE_USER}" "${SITE_USER}" "The site home should be private to the site user, with Apache granted access through ACLs only where needed."
-check_dir "${site_root}" 750 "${SITE_USER}" "${SITE_USER}" "The site root should be owned by the PHP-FPM site user, not by Apache."
-check_dir "${docroot}" 750 "${SITE_USER}" "${SITE_USER}" "Apache should be able to read the public document root through ACLs without owning the whole site."
-check_dir "${logs}" 750 "${SITE_USER}" "${SITE_USER}" "Logs live under the site home so they remain grouped with the site and easy to inspect."
-check_dir "${tmpdir}" 750 "${SITE_USER}" "${SITE_USER}" "Per-site temporary storage avoids sharing writable runtime paths across sites."
+check_dir "${site_home}" 750 "${MH_WEBSITE_HC_SITE_USER}" "${MH_WEBSITE_HC_SITE_USER}" "The site home should be private to the site user, with Apache granted access through ACLs only where needed."
+check_dir "${site_root}" 750 "${MH_WEBSITE_HC_SITE_USER}" "${MH_WEBSITE_HC_SITE_USER}" "The site root should be owned by the PHP-FPM site user, not by Apache."
+check_dir "${docroot}" 750 "${MH_WEBSITE_HC_SITE_USER}" "${MH_WEBSITE_HC_SITE_USER}" "Apache should be able to read the public document root through ACLs without owning the whole site."
+check_dir "${logs}" 750 "${MH_WEBSITE_HC_SITE_USER}" "${MH_WEBSITE_HC_SITE_USER}" "Logs live under the site home so they remain grouped with the site and easy to inspect."
+check_dir "${tmpdir}" 750 "${MH_WEBSITE_HC_SITE_USER}" "${MH_WEBSITE_HC_SITE_USER}" "Per-site temporary storage avoids sharing writable runtime paths across sites."
 
-if [[ "${IS_LARAVEL}" =~ ^[Yy]$ ]]; then
-    check_dir "${site_root}/storage" 775 "${SITE_USER}" "${SITE_USER}" "Laravel storage must be writable by the PHP-FPM site user for cache, sessions, logs and uploads."
-    check_dir "${site_root}/bootstrap/cache" 775 "${SITE_USER}" "${SITE_USER}" "Laravel bootstrap/cache must be writable by the PHP-FPM site user during deployment and cache rebuilds."
+if [[ "${MH_WEBSITE_HC_IS_LARAVEL}" =~ ^[Yy]$ ]]; then
+    check_dir "${site_root}/storage" 775 "${MH_WEBSITE_HC_SITE_USER}" "${MH_WEBSITE_HC_SITE_USER}" "Laravel storage must be writable by the PHP-FPM site user for cache, sessions, logs and uploads."
+    check_dir "${site_root}/bootstrap/cache" 775 "${MH_WEBSITE_HC_SITE_USER}" "${MH_WEBSITE_HC_SITE_USER}" "Laravel bootstrap/cache must be writable by the PHP-FPM site user during deployment and cache rebuilds."
     [[ -f "${site_root}/artisan" ]] && health_ok "Laravel artisan file exists." || health_warn "Laravel artisan file not found; this may be normal before code is deployed."
     [[ -d "${site_root}/public" ]] && health_ok "Laravel public directory exists." || health_fail "Laravel public directory is missing: ${site_root}/public"
 fi
@@ -187,27 +193,27 @@ fi
 
 pool_files=()
 for php_version in "${PHP_VERSIONS[@]}"; do
-    candidate="/etc/php/${php_version}/fpm/pool.d/${SITE_USER}.conf"
+    candidate="/etc/php/${php_version}/fpm/pool.d/${MH_WEBSITE_HC_SITE_USER}.conf"
     if [[ -f "${candidate}" ]]; then
         pool_files+=("${candidate}")
     fi
 done
 
 if [[ "${#pool_files[@]}" -eq 0 ]]; then
-    health_warn "No PHP-FPM pool found for ${SITE_USER}; this may be normal before vhost creation."
+    health_warn "No PHP-FPM pool found for ${MH_WEBSITE_HC_SITE_USER}; this may be normal before vhost creation."
 else
     for pool_file in "${pool_files[@]}"; do
         health_ok "PHP-FPM pool exists: ${pool_file}"
-        if grep -Eq "^user[[:space:]]*=[[:space:]]*${SITE_USER}$" "${pool_file}"; then
-            health_ok "${pool_file} runs PHP as ${SITE_USER}."
+        if grep -Eq "^user[[:space:]]*=[[:space:]]*${MH_WEBSITE_HC_SITE_USER}$" "${pool_file}"; then
+            health_ok "${pool_file} runs PHP as ${MH_WEBSITE_HC_SITE_USER}."
         else
-            health_fail "${pool_file} does not appear to run PHP as ${SITE_USER}."
+            health_fail "${pool_file} does not appear to run PHP as ${MH_WEBSITE_HC_SITE_USER}."
         fi
     done
 fi
 
-if compgen -G "/etc/apache2/sites-enabled/*${SITE_USER}*" >/dev/null; then
-    health_ok "An enabled Apache site appears to reference ${SITE_USER}."
+if compgen -G "/etc/apache2/sites-enabled/*${MH_WEBSITE_HC_SITE_USER}*" >/dev/null; then
+    health_ok "An enabled Apache site appears to reference ${MH_WEBSITE_HC_SITE_USER}."
 else
     if grep -Rqs "${docroot}" /etc/apache2/sites-enabled 2>/dev/null; then
         health_ok "An enabled Apache site points at ${docroot}."
@@ -217,8 +223,11 @@ else
 fi
 
 echo
-info "Website health check complete: ${PASS_COUNT} ok, ${WARN_COUNT} warnings, ${FAIL_COUNT} failures."
+info "Website health check complete: ${MH_WEBSITE_HC_PASS_COUNT} ok, ${MH_WEBSITE_HC_WARN_COUNT} warnings, ${MH_WEBSITE_HC_FAIL_COUNT} failures."
 
-if (( FAIL_COUNT > 0 )); then
-    exit 1
-fi
+    if (( MH_WEBSITE_HC_FAIL_COUNT > 0 )); then
+        exit 1
+    fi
+}
+
+main_website_health_check "$@"
