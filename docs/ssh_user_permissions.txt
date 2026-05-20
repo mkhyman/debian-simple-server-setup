@@ -1,0 +1,113 @@
+ssh_user_permissions.txt
+========================
+
+Purpose
+-------
+
+This document records the intended SSH-related file and directory permissions
+used by this toolkit.
+
+SSH is deliberately strict about private key and authorized_keys permissions.
+Loose permissions can either weaken security or cause SSH to ignore files that
+look unsafe.
+
+
+Expected user SSH layout
+------------------------
+
+For a normal Linux user:
+
+    /home/example_user
+        owner: example_user
+        group: example_user
+        mode:  normally not world-writable
+
+    /home/example_user/.ssh
+        owner: example_user
+        group: example_user
+        mode:  700
+
+    /home/example_user/.ssh/authorized_keys
+        owner: example_user
+        group: example_user
+        mode:  600
+
+
+Why .ssh is 700
+---------------
+
+The .ssh directory may contain private SSH material now or in the future.
+
+Mode 700 means:
+
+    - the user can read, write and enter it
+    - group users cannot inspect it
+    - other local users cannot inspect it
+
+This avoids accidental disclosure and keeps OpenSSH satisfied that the directory
+is not too permissive.
+
+
+Why authorized_keys is 600
+--------------------------
+
+authorized_keys controls who can log in as the user.
+
+Mode 600 means:
+
+    - the user can read and write it
+    - group users cannot alter or inspect it
+    - other local users cannot alter or inspect it
+
+The important security concern is write access. If another local user could
+modify authorized_keys, they could potentially add their own key and gain access
+as that account.
+
+
+Ownership
+---------
+
+SSH files should be owned by the account they belong to.
+
+For user example_user:
+
+    .ssh            example_user:example_user
+    authorized_keys example_user:example_user
+
+Root-owned authorized_keys files can sometimes work depending on configuration,
+but this toolkit prefers the simple personal-server model: each user's SSH
+material belongs to that user.
+
+
+Health check behaviour
+----------------------
+
+The user health check should report:
+
+    - whether the Linux user exists
+    - whether the home directory exists
+    - whether .ssh exists
+    - whether authorized_keys exists
+    - whether owner/group/mode match the expected model
+
+In report-only mode it should not change anything.
+
+With --interactive-fix, it may prompt to create or repair low-risk filesystem
+state:
+
+    - create .ssh with mode 700
+    - create authorized_keys with mode 600
+    - correct owner/group/mode for those paths
+
+It should not silently change SSH access policy, rewrite sshd_config, remove
+keys, disable accounts or change passwords.
+
+
+Guiding principle
+-----------------
+
+SSH permission fixes are allowed because they are narrow, well-understood and
+easy to inspect.
+
+SSH policy changes are different. They affect access to the server and should
+remain in explicit setup scripts, not hidden inside a health check.

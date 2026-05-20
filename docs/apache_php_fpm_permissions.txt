@@ -1,0 +1,272 @@
+apache_php_fpm_permissions.txt
+================================
+
+Purpose
+-------
+
+This document records the intended Apache/PHP-FPM/site-file permission model
+used by this toolkit.
+
+The main goal is to avoid giving Apache broad ownership or write access while
+still allowing Apache to serve public files and hand PHP requests to the correct
+PHP-FPM pool.
+
+This is personal hosting tooling, not a generic control panel. The permissions
+below are deliberately opinionated and are intended to be understandable when
+reviewed months later.
+
+
+High-level model
+----------------
+
+Apache:
+
+    Runs as:      www-data
+    Role:         public file reader and PHP-FPM proxy
+    Should own:   almost nothing under a site
+    Should write: normally nothing under a site directory
+
+PHP-FPM:
+
+    Runs as:      the specific Linux site user
+    Role:         executes the PHP/Laravel application
+    Should write: the site's own writable application paths
+
+Site files:
+
+    Owned by:     the specific Linux site user
+    Group:        normally the same site user
+    Goal:         one site's PHP process should not casually read/write another
+                  site's private files
+
+
+Why Apache stays as www-data
+----------------------------
+
+Apache can be made to run per-vhost code through historical mechanisms such as
+suexec-style approaches, but that tends to add complexity and surprising failure
+modes.
+
+For this toolkit the cleaner boundary is PHP-FPM:
+
+    Apache www-data
+        -> connects to the site's PHP-FPM socket
+        -> PHP executes as the site user
+
+The risky application code is normally PHP, not Apache serving static files.
+Therefore PHP-FPM is the security boundary that matters most.
+
+
+Why private directories prefer 700
+----------------------------------
+
+The toolkit prefers mode 700 for private site directories where practical.
+
+Mode 700 means:
+
+    - the site user can read, write and enter the directory
+    - the Unix group has no access
+    - other local users have no access
+
+This avoids turning the Unix group into an accidental trust boundary.
+
+For example, if a future administrator created a broad group such as site_users
+and accidentally placed multiple site users in it, mode 750 would suddenly grant
+that group read/traverse access. Mode 700 avoids that class of mistake.
+
+Apache access should be granted explicitly with ACLs, not by relying on group
+membership or broad group permissions.
+
+Mode 750 is not inherently wrong. It is appropriate when group access is a
+conscious part of the design. For this toolkit's default site model, it is not
+needed for most site paths.
+
+
+Expected directory model
+------------------------
+
+For a site user called example_site, the broad shape is:
+
+    /var/www/example_site
+        owner: example_site
+        group: example_site
+        mode:  700
+
+    /var/www/example_site/site
+        owner: example_site
+        group: example_site
+        mode:  700
+
+    /var/www/example_site/site/public
+        owner: example_site
+        group: example_site
+        mode:  700
+        ACL:   www-data gets read/execute
+        default ACL: new files/directories should inherit www-data read/execute
+
+    /var/www/example_site/logs
+        owner: example_site
+        group: example_site
+        mode:  700
+
+    /var/www/example_site/tmp
+        owner: example_site
+        group: example_site
+        mode:  700
+
+Exact paths depend on the constants in config/common code, but the principle is
+the same: the site user owns the site, and Apache is granted only the access it
+needs.
+
+
+ACL model
+---------
+
+The toolkit uses ACLs so the site can remain owned by the site user while Apache
+still gets the minimum access needed.
+
+Expected ACL intent:
+
+    Site home:
+        www-data gets execute/search only.
+
+    Site root:
+        www-data gets execute/search only.
+
+    Public document root:
+        www-data gets read and execute.
+        A default ACL should give new public files/directories equivalent Apache
+        read/traverse access.
+
+This is preferable to making everything group-owned by www-data, because it keeps
+ownership simple and makes Apache's access explicit.
+
+The toolkit does not grant Apache broad write access to the site tree by default.
+PHP-FPM runs as the site user and should perform application writes itself.
+
+
+Apache logs and PHP temporary files
+-----------------------------------
+
+The vhost may point Apache access/error logs at the site's logs directory.
+Apache's root parent process is responsible for opening those log files, so the
+directory does not need to be generally writable by www-data.
+
+PHP error logs, upload temporary files and session files are handled by PHP-FPM,
+which runs as the site user. Therefore logs and tmp can remain private to the
+site user.
+
+If a future change genuinely requires Apache worker write access to a site path,
+that should be documented next to the change and granted with a narrow ACL rather
+than by loosening the whole directory tree.
+
+
+Laravel-specific paths
+----------------------
+
+Laravel needs writable paths, but those paths should be writable by the PHP-FPM
+site user, not by Apache as a general rule.
+
+Important paths:
+
+    storage/
+    bootstrap/cache/
+
+Current toolkit expectation:
+
+    owner: site user
+    group: site user
+    mode:  700
+
+The reason for the write access is Laravel runtime/deployment behaviour: logs,
+cache files, sessions, uploaded files, compiled views and related application
+state.
+
+The reason mode 700 is sufficient is that PHP-FPM runs as the site user. Apache
+does not need to own these paths and does not need group/world write access.
+
+
+Laravel public storage symlink
+------------------------------
+
+Laravel sites often expose public uploads through:
+
+    public/storage -> ../storage/app/public
+
+That path is an exception to the simple rule that Apache only reads public/.
+If public storage is used, Apache also needs narrow read/traverse ACLs along the
+specific storage/app/public path that the symlink exposes.
+
+Do not grant Apache read access to all of storage/ just to make public uploads
+work. Grant the smallest path-specific ACL that serves the public files.
+
+
+.env files
+----------
+
+Laravel .env files commonly contain secrets such as database credentials and app
+keys.
+
+Expected model:
+
+    owner: site user
+    group: site user
+    mode:  600 where practical
+
+Apache should not need to read .env directly. PHP-FPM can read it because PHP is
+executing as the site user.
+
+
+PHP-FPM pools
+-------------
+
+Each site should have its own PHP-FPM pool.
+
+Expected pool intent:
+
+    user  = site user
+    group = site user
+
+The pool socket must be accessible to Apache, because Apache needs to pass PHP
+requests to PHP-FPM.
+
+Typical socket intent:
+
+    socket owner/group/mode allow Apache to connect
+    PHP worker process itself still runs as the site user
+
+The important distinction is:
+
+    socket access lets Apache hand off a request
+    process user controls what the PHP application can read/write
+
+
+What the health check should care about
+---------------------------------------
+
+The website health check should detect or warn about:
+
+    - site user missing
+    - site directories missing
+    - unexpected ownership or modes
+    - missing Apache ACLs on the private parents and public document root
+    - .env being world-readable
+    - PHP-FPM pool not running as the site user
+    - missing Laravel public/storage/bootstrap/cache paths
+    - enabled Apache vhost not pointing at the expected document root
+
+Interactive fixes should be limited to low-risk ownership, mode and ACL repairs.
+They should not silently rewrite application code, database permissions,
+certificates or major service configuration.
+
+
+Guiding principle
+-----------------
+
+Apache should be treated as a shared front-end process.
+
+PHP-FPM should be treated as the per-site execution boundary.
+
+The site user should own the application.
+
+Permissions should make that model visible.
