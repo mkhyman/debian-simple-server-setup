@@ -596,15 +596,19 @@ ensure_website_directories() {
     root="$(site_root_for_user "${site_user}")"
     docroot="$(site_docroot_for_user "${site_user}" "${is_laravel}")"
 
-    install -d -m 750 -o "${site_user}" -g "${site_user}" "${home}" || return 1
-    install -d -m 750 -o "${site_user}" -g "${site_user}" "${root}" || return 1
-    install -d -m 750 -o "${site_user}" -g "${site_user}" "${home}/${SITE_LOG_DIR}" || return 1
-    install -d -m 750 -o "${site_user}" -g "${site_user}" "${home}/${SITE_TMP_DIR}" || return 1
-    install -d -m 750 -o "${site_user}" -g "${site_user}" "${docroot}" || return 1
+    # Keep the site's Unix group from becoming an accidental trust boundary.
+    # Apache receives explicit ACL access only where required.
+    install -d -m 700 -o "${site_user}" -g "${site_user}" "${home}" || return 1
+    install -d -m 700 -o "${site_user}" -g "${site_user}" "${root}" || return 1
+    install -d -m 700 -o "${site_user}" -g "${site_user}" "${home}/${SITE_LOG_DIR}" || return 1
+    install -d -m 700 -o "${site_user}" -g "${site_user}" "${home}/${SITE_TMP_DIR}" || return 1
+    install -d -m 700 -o "${site_user}" -g "${site_user}" "${docroot}" || return 1
 
     if [[ "${is_laravel}" =~ ^[Yy]$ ]]; then
-        install -d -m 775 -o "${site_user}" -g "${site_user}" "${root}/storage" || return 1
-        install -d -m 775 -o "${site_user}" -g "${site_user}" "${root}/bootstrap/cache" || return 1
+        # PHP-FPM runs as the site user, so Laravel writable paths do not
+        # need group/world write bits for Apache.
+        install -d -m 700 -o "${site_user}" -g "${site_user}" "${root}/storage" || return 1
+        install -d -m 700 -o "${site_user}" -g "${site_user}" "${root}/bootstrap/cache" || return 1
     fi
 }
 
@@ -621,11 +625,13 @@ ensure_website_acls() {
 
     command -v setfacl >/dev/null 2>&1 || return 1
 
+    # Apache only needs to traverse private parent directories and read the
+    # public document root. PHP-FPM, running as the site user, handles writable
+    # application state.
     setfacl -m "u:${APACHE_RUN_USER}:--x" "${home}" || return 1
     setfacl -m "u:${APACHE_RUN_USER}:--x" "${root}" || return 1
     setfacl -m "u:${APACHE_RUN_USER}:rx" "${docroot}" || return 1
-    setfacl -m "u:${APACHE_RUN_USER}:rwx" "${logs}" || return 1
-    setfacl -m "u:${APACHE_RUN_USER}:rwx" "${tmpdir}" || return 1
+    setfacl -d -m "u:${APACHE_RUN_USER}:rx" "${docroot}" || return 1
 }
 
 # Returns:

@@ -176,15 +176,15 @@ main_website_health_check() {
     fi
     health_ok "Linux site user exists: ${site_user}"
 
-    check_dir "${site_home}" 750 "${site_user}" "${site_user}" "The site home should be private to the site user, with Apache granted access through ACLs only where needed." "${interactive_fix}"
-    check_dir "${site_root}" 750 "${site_user}" "${site_user}" "The site root should be owned by the PHP-FPM site user, not by Apache." "${interactive_fix}"
-    check_dir "${docroot}" 750 "${site_user}" "${site_user}" "Apache should be able to read the public document root through ACLs without owning the whole site." "${interactive_fix}"
-    check_dir "${logs}" 750 "${site_user}" "${site_user}" "Logs live under the site home so they remain grouped with the site and easy to inspect." "${interactive_fix}"
-    check_dir "${tmpdir}" 750 "${site_user}" "${site_user}" "Per-site temporary storage avoids sharing writable runtime paths across sites." "${interactive_fix}"
+    check_dir "${site_home}" 700 "${site_user}" "${site_user}" "The site home should be private to the site user, with Apache granted explicit traversal through ACLs only where needed." "${interactive_fix}"
+    check_dir "${site_root}" 700 "${site_user}" "${site_user}" "The site root should not rely on group access; Apache gets explicit ACL access to the public document root." "${interactive_fix}"
+    check_dir "${docroot}" 700 "${site_user}" "${site_user}" "The public document root remains site-owned; Apache receives read access through ACLs rather than ownership or group membership." "${interactive_fix}"
+    check_dir "${logs}" 700 "${site_user}" "${site_user}" "Logs stay private to the site user; Apache log files are opened by the root Apache parent process and PHP logs are written by PHP-FPM as the site user." "${interactive_fix}"
+    check_dir "${tmpdir}" 700 "${site_user}" "${site_user}" "Per-site temporary storage is for PHP-FPM running as the site user, not a shared Apache-writable scratch area." "${interactive_fix}"
 
     if [[ "${is_laravel}" =~ ^[Yy]$ ]]; then
-        check_dir "${site_root}/storage" 775 "${site_user}" "${site_user}" "Laravel storage must be writable by the PHP-FPM site user for cache, sessions, logs and uploads." "${interactive_fix}"
-        check_dir "${site_root}/bootstrap/cache" 775 "${site_user}" "${site_user}" "Laravel bootstrap/cache must be writable by the PHP-FPM site user during deployment and cache rebuilds." "${interactive_fix}"
+        check_dir "${site_root}/storage" 700 "${site_user}" "${site_user}" "Laravel storage must be writable by the PHP-FPM site user; group/world write access is not needed for Apache." "${interactive_fix}"
+        check_dir "${site_root}/bootstrap/cache" 700 "${site_user}" "${site_user}" "Laravel bootstrap/cache is written by PHP-FPM as the site user during deployment and cache rebuilds." "${interactive_fix}"
         [[ -f "${site_root}/artisan" ]] && health_ok "Laravel artisan file exists." || health_warn "Laravel artisan file not found; this may be normal before code is deployed."
         [[ -d "${site_root}/public" ]] && health_ok "Laravel public directory exists." || health_fail "Laravel public directory is missing: ${site_root}/public"
     fi
@@ -195,8 +195,7 @@ main_website_health_check() {
         check_acl_contains "${site_home}" "^user:${APACHE_RUN_USER}:--x$" "Apache has traversal-only access to ${site_home}." "${site_user}" "${is_laravel}" "${interactive_fix}"
         check_acl_contains "${site_root}" "^user:${APACHE_RUN_USER}:--x$" "Apache has traversal-only access to ${site_root}." "${site_user}" "${is_laravel}" "${interactive_fix}"
         check_acl_contains "${docroot}" "^user:${APACHE_RUN_USER}:r-x$" "Apache has read/execute access to ${docroot}." "${site_user}" "${is_laravel}" "${interactive_fix}"
-        check_acl_contains "${logs}" "^user:${APACHE_RUN_USER}:rwx$" "Apache can write site logs under ${logs}." "${site_user}" "${is_laravel}" "${interactive_fix}"
-        check_acl_contains "${tmpdir}" "^user:${APACHE_RUN_USER}:rwx$" "Apache can use the site's temporary directory." "${site_user}" "${is_laravel}" "${interactive_fix}"
+        check_acl_contains "${docroot}" "^default:user:${APACHE_RUN_USER}:r-x$" "New files under ${docroot} should inherit Apache read/execute ACLs." "${site_user}" "${is_laravel}" "${interactive_fix}"
     fi
 
     pool_files=()
