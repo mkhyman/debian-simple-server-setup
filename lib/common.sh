@@ -411,27 +411,146 @@ remove_authorized_key_by_number() {
     chmod 600 "${auth_keys}" || return 1
 }
 
-ensure_sshd_allow_user() {
-    local username="$1"
-    local sshd_config="/etc/ssh/sshd_config"
+###############################################################################
+# SSHD CONFIGURATION FRAGMENT HELPERS
+#
+# The toolkit owns one small sshd_config.d fragment instead of repeatedly
+# editing Debian's main sshd_config. That keeps package-managed defaults easy to
+# inspect, makes rollback obvious, and reduces the chance of brittle sed edits
+# causing lockout on a future Debian release.
+###############################################################################
 
-    backup_file "${sshd_config}" || return 1
+sshd_main_config_path() {
+    echo "/etc/ssh/sshd_config"
+}
 
-    if grep -Eq "^[[:space:]]*AllowUsers[[:space:]]+" "${sshd_config}"; then
-        local existing
-        existing="$(grep -E "^[[:space:]]*AllowUsers[[:space:]]+" "${sshd_config}" | tail -n1 | sed -E 's/^[[:space:]]*AllowUsers[[:space:]]+//')"
+sshd_config_dir_path() {
+    echo "/etc/ssh/sshd_config.d"
+}
 
-        if echo " ${existing} " | grep -q " ${username} "; then
-            info "AllowUsers already includes ${username}."
-            return 0
-        fi
+sshd_managed_config_path() {
+    echo "$(sshd_config_dir_path)/server-admin.conf"
+}
 
-        sed -i -E "s|^[[:space:]]*AllowUsers[[:space:]]+.*|AllowUsers ${existing} ${username}|" "${sshd_config}" || return 1
-    else
-        echo "AllowUsers ${username}" >> "${sshd_config}" || return 1
+sshd_main_config_has_fragment_include() {
+    local sshd_config
+    sshd_config="$(sshd_main_config_path)"
+
+    grep -Eq "^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf([[:space:]]+.*)?$" "${sshd_config}"
+}
+
+ensure_sshd_config_fragments_enabled() {
+    local sshd_config sshd_config_dir tmp_original tmp_new
+    sshd_config="$(sshd_main_config_path)"
+    sshd_config_dir="$(sshd_config_dir_path)"
+
+    install -d -m 755 -o root -g root "${sshd_config_dir}" || return 1
+
+    if sshd_main_config_has_fragment_include; then
+        info "SSH config fragments are already enabled in ${sshd_config}."
+        return 0
     fi
 
+    # This is intentionally not interactive: the managed fragment cannot be a
+    # safe source of truth unless sshd actually includes the fragment directory.
+    backup_file "${sshd_config}" || return 1
+    tmp_original="$(mktemp)"
+    tmp_new="$(mktemp)"
+    cp -a "${sshd_config}" "${tmp_original}" || { rm -f "${tmp_original}" "${tmp_new}"; return 1; }
+
+    {
+        echo "Include /etc/ssh/sshd_config.d/*.conf"
+        echo
+        cat "${sshd_config}"
+    } > "${tmp_new}" || { rm -f "${tmp_original}" "${tmp_new}"; return 1; }
+
+    cp "${tmp_new}" "${sshd_config}" || { rm -f "${tmp_original}" "${tmp_new}"; return 1; }
+    chown root:root "${sshd_config}" || { cp "${tmp_original}" "${sshd_config}"; rm -f "${tmp_original}" "${tmp_new}"; return 1; }
+    chmod 644 "${sshd_config}" || { cp "${tmp_original}" "${sshd_config}"; rm -f "${tmp_original}" "${tmp_new}"; return 1; }
+
+    info "SSH config fragments were not enabled. Added Include /etc/ssh/sshd_config.d/*.conf to ${sshd_config}."
+
+    if ! validate_sshd_config; then
+        warn "Restoring ${sshd_config} because enabling SSH config fragments did not validate."
+        cp "${tmp_original}" "${sshd_config}" || true
+        rm -f "${tmp_original}" "${tmp_new}"
+        return 1
+    fi
+
+    rm -f "${tmp_original}" "${tmp_new}"
+}
+
+sshd_collect_allow_users() {
+    local file
+
+    for file in "$(sshd_managed_config_path)" "$(sshd_main_config_path)"; do
+        [[ -f "${file}" ]] || continue
+        grep -E "^[[:space:]]*AllowUsers[[:space:]]+" "${file}" \
+            | sed -E 's/^[[:space:]]*AllowUsers[[:space:]]+//' \
+            | tr ' ' '\n' \
+            | awk 'NF'
+    done | awk '!seen[$0]++'
+}
+
+sshd_managed_fragment_has_permit_root_disabled() {
+    local managed_config
+    managed_config="$(sshd_managed_config_path)"
+
+    [[ -f "${managed_config}" ]] || return 1
+    grep -Eq "^[[:space:]]*PermitRootLogin[[:space:]]+no([[:space:]]+.*)?$" "${managed_config}"
+}
+
+write_sshd_managed_fragment() {
+    local permit_root_login_no="$1"
+    shift || true
+
+    local managed_config tmp user allow_users=()
+    managed_config="$(sshd_managed_config_path)"
+    tmp="$(mktemp)"
+
+    for user in $(sshd_collect_allow_users) "$@"; do
+        [[ -n "${user}" ]] || continue
+        if ! printf '%s\n' "${allow_users[@]:-}" | grep -qxF "${user}"; then
+            allow_users+=("${user}")
+        fi
+    done
+
+    {
+        echo "# Managed by server-admin."
+        echo "#"
+        echo "# This fragment keeps local SSH policy separate from Debian's packaged"
+        echo "# sshd_config so upgrades and local recovery remain easy to reason about."
+        echo
+        if [[ "${permit_root_login_no}" == "yes" ]]; then
+            echo "PermitRootLogin no"
+        fi
+        if [[ "${#allow_users[@]}" -gt 0 ]]; then
+            echo "AllowUsers ${allow_users[*]}"
+        fi
+    } > "${tmp}" || { rm -f "${tmp}"; return 1; }
+
+    ensure_sshd_config_fragments_enabled || { rm -f "${tmp}"; return 1; }
+    write_managed_file "${managed_config}" 0644 root:root "${tmp}" || { rm -f "${tmp}"; return 1; }
+    rm -f "${tmp}"
+}
+
+ensure_sshd_allow_user() {
+    local username="$1"
+    local permit_root_login_no="no"
+
+    if sshd_managed_fragment_has_permit_root_disabled; then
+        permit_root_login_no="yes"
+    fi
+
+    write_sshd_managed_fragment "${permit_root_login_no}" "${username}" || return 1
     reload_sshd_safely || return 1
+    info "SSH AllowUsers is managed in $(sshd_managed_config_path) and includes ${username}."
+}
+
+ensure_sshd_root_login_disabled() {
+    write_sshd_managed_fragment "yes" || return 1
+    reload_sshd_safely || return 1
+    info "SSH root login is disabled via $(sshd_managed_config_path)."
 }
 
 validate_hostname() {

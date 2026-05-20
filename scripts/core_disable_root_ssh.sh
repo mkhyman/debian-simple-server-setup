@@ -25,16 +25,9 @@ fi
 read -rp "Type DISABLE_ROOT to continue: " typed
 [[ "${typed}" == "DISABLE_ROOT" ]] || { info "Aborted."; exit 0; }
 
-# Back up before editing and validate before reload; SSH configuration mistakes
-# are high-impact because they can remove the only remote access path.
-backup_file /etc/ssh/sshd_config || fail "Could not back up sshd_config."
-
-if grep -Eq "^[#[:space:]]*PermitRootLogin[[:space:]]+" /etc/ssh/sshd_config; then
-    sed -i -E 's|^[#[:space:]]*PermitRootLogin[[:space:]]+.*|PermitRootLogin no|' /etc/ssh/sshd_config
-else
-    echo "PermitRootLogin no" >> /etc/ssh/sshd_config
-fi
-
-reload_sshd_safely || fail "Could not validate and reload ssh."
+# Use the managed sshd_config.d fragment rather than editing Debian's main
+# sshd_config. Root login policy is important enough to own explicitly, but not
+# important enough to make future package upgrades harder to inspect.
+ensure_sshd_root_login_disabled || fail "Could not disable root SSH login safely."
 
 ok "Root SSH login disabled."
