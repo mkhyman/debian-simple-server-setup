@@ -1,0 +1,87 @@
+Architecture Overview
+=====================
+
+Purpose
+-------
+This project provides a lightweight, opinionated toolkit for quickly rebuilding
+a Debian-based PHP hosting server from a blank installation.
+
+The primary target is:
+- Debian 13 (later versions only after testing)
+- PHP websites (primarily Laravel)
+- Small personal hosting environments
+
+Core Principles
+---------------
+Keep it lightweight.
+Keep it understandable.
+Prefer maintainability over cleverness.
+
+Control Scripts
+---------------
+Control scripts:
+- orchestrate actions
+- determine control flow
+- explain to the user what is happening
+- handle prompts, warnings and failures
+
+Examples:
+- core_base_system.sh
+- core_health_check.sh
+- user_website.sh
+- website_create_https_vhost.sh
+
+Libraries
+---------
+Libraries provide reusable primitives.
+
+Libraries should:
+- do one thing
+- avoid hidden workflow logic
+- avoid screen output where practical
+- be generic and reusable
+
+Examples:
+- svc_reload(service_name)
+- user_system_group_exists(group_name)
+- file_set_directory_mode(path, mode)
+
+Wrappers
+--------
+Small wrapper functions are acceptable when:
+- centralising risk
+- removing repeated code
+- reused by multiple scripts
+
+Example:
+file_write_managed centralises safer file replacement.
+
+Health Checks
+-------------
+Health checks:
+- inspect first
+- report clearly
+- do not silently mutate
+- support interactive fixes only
+
+Permission Model
+----------------
+Server-admin toolkit:
+- root owns security boundaries
+- server_admin group maintains toolkit
+- SSL private keys remain root-only
+
+Website model:
+- isolated Linux users per site
+- isolated PHP-FPM pools per site
+- Apache access via ACLs
+- minimal shared writable access
+
+Testing Philosophy
+------------------
+Primary local testing:
+- disposable Debian WSL instance
+
+Production validation:
+- clean Debian install
+- real server verification before trust

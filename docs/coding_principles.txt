@@ -79,6 +79,31 @@ Examples:
 This is a Bash project, so visibility matters. Future maintainers should be able
 to spot wider-scope state immediately.
 
+Library functions should be namespaced.
+
+Preferred namespaces:
+
+- log_
+- prompt_
+- svc_
+- file_
+- user_
+- ssh_
+- site_
+- cert_
+- fpm_
+
+Prefer readable 3-4 character prefixes.
+
+Consistency matters more than perfect naming.
+
+Do not mix naming styles for the same concept.
+
+Examples:
+- system_group_exists + create_system_group
+- file_set_directory_mode
+- svc_restart
+
 
 Variable scope
 --------------
@@ -122,8 +147,6 @@ rather than repeating this everywhere:
 That way, if Debian changes service management details later, there is one place
 to adapt the project.
 
-
-
 Single responsibility
 ---------------------
 
@@ -154,7 +177,6 @@ that responsibility obvious.
 This separation keeps checks reusable and avoids hidden side effects. In Bash,
 where there are no classes or real namespaces, this matters more than it would in
 a more structured language.
-
 
 Library functions and script control flow
 -----------------------------------------
@@ -381,6 +403,7 @@ call svc_reload "apache2" rather than invoking systemctl directly.
 Do not mix vocabulary for the same concept. For example, do not use group,
 linux_group and system_group interchangeably. Pick the project vocabulary and
 use it consistently.
+
 Server-admin toolkit permissions
 --------------------------------
 
@@ -393,3 +416,40 @@ Permission repair code must preserve that exception explicitly. Broad chmod/chgr
 operations should be followed by a final re-hardening step for root-only secret
 storage where needed.
 
+Architecture Principles
+-----------------------
+Single Responsibility Principle applies strongly.
+
+Functions should:
+- do one thing
+- avoid hidden control flow
+- avoid unexpected screen output
+
+Libraries:
+- reusable primitives
+- minimal logging
+- generic where practical
+
+Control scripts:
+- orchestration
+- logging
+- user messaging
+- decisions and flow control
+
+Wrappers are acceptable only when:
+- reused in multiple places
+- centralising risky behaviour
+- simplifying repeated sequences
+
+
+Testing Philosophy
+------------------
+Local testing should normally use a disposable Debian WSL environment.
+
+Target Debian versions should be explicit.
+
+Example:
+Debian 13 until Debian 14 has been tested and approved.
+
+Always validate important changes on a clean Debian environment and
+perform occasional real-server verification.
