@@ -2,15 +2,15 @@
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 source "${repo_root}/lib/common.sh" "$@"
-require_root
-require_base_system_complete
+user_require_root
+state_require_base_system_complete
 
 MH_WEBSITE_HC_PASS_COUNT=0
 MH_WEBSITE_HC_WARN_COUNT=0
 MH_WEBSITE_HC_FAIL_COUNT=0
 
-health_ok() { ok "$*"; MH_WEBSITE_HC_PASS_COUNT=$((MH_WEBSITE_HC_PASS_COUNT+1)); }
-health_warn() { warn "$*"; MH_WEBSITE_HC_WARN_COUNT=$((MH_WEBSITE_HC_WARN_COUNT+1)); }
+health_ok() { log_ok "$*"; MH_WEBSITE_HC_PASS_COUNT=$((MH_WEBSITE_HC_PASS_COUNT+1)); }
+health_warn() { log_warn "$*"; MH_WEBSITE_HC_WARN_COUNT=$((MH_WEBSITE_HC_WARN_COUNT+1)); }
 health_fail() { echo "[FAIL] $*"; echo "[FAIL] $*" >>"${LOG_FILE}"; MH_WEBSITE_HC_FAIL_COUNT=$((MH_WEBSITE_HC_FAIL_COUNT+1)); }
 
 maybe_fix_dir() {
@@ -23,7 +23,7 @@ maybe_fix_dir() {
 
     [[ "${interactive_fix}" == "yes" ]] || return 0
     echo "${reason}"
-    if confirm "Set ${path} to ${owner}:${group} ${mode} now?"; then
+    if prompt_confirm "Set ${path} to ${owner}:${group} ${mode} now?"; then
         install -d -m "${mode}" -o "${owner}" -g "${group}" "${path}" || { health_fail "Could not fix ${path}."; return 1; }
         health_ok "Fixed ${path}."
     fi
@@ -40,7 +40,7 @@ maybe_fix_file_mode_owner() {
     [[ "${interactive_fix}" == "yes" ]] || return 0
     [[ -f "${path}" ]] || return 0
     echo "${reason}"
-    if confirm "Set ${path} to ${owner}:${group} ${mode} now?"; then
+    if prompt_confirm "Set ${path} to ${owner}:${group} ${mode} now?"; then
         chown "${owner}:${group}" "${path}" || { health_fail "Could not chown ${path}."; return 1; }
         chmod "${mode}" "${path}" || { health_fail "Could not chmod ${path}."; return 1; }
         health_ok "Fixed ${path}."
@@ -93,8 +93,8 @@ check_acl_contains() {
         health_fail "Missing ACL: ${description}"
         if [[ "${interactive_fix}" == "yes" ]]; then
             echo "Apache should receive only the access it needs while PHP runs as the site user."
-            if confirm "Re-apply toolkit ACLs for ${site_user}?"; then
-                ensure_website_acls "${site_user}" "${is_laravel}" || { health_fail "Could not re-apply website ACLs."; return 1; }
+            if prompt_confirm "Re-apply toolkit ACLs for ${site_user}?"; then
+                site_ensure_acls "${site_user}" "${is_laravel}" || { health_fail "Could not re-apply website ACLs."; return 1; }
                 health_ok "Re-applied website ACLs for ${site_user}."
             fi
         fi
@@ -142,7 +142,7 @@ main_website_health_check() {
         read -rp "Linux site username to check: " site_user
     fi
 
-    validate_linux_username "${site_user}" || fail "Invalid Linux username: ${site_user}"
+    user_validate_system_username "${site_user}" || log_fail "Invalid Linux username: ${site_user}"
 
     site_home="$(site_home_for_user "${site_user}")"
     site_root="$(site_root_for_user "${site_user}")"
@@ -161,17 +161,17 @@ main_website_health_check() {
     tmpdir="${site_home}/${SITE_TMP_DIR}"
 
     echo
-    info "Running website health check for ${site_user}."
+    log_info "Running website health check for ${site_user}."
     if [[ "${interactive_fix}" == "yes" ]]; then
-        info "Interactive fixes are enabled for low-risk filesystem and ACL issues."
+        log_info "Interactive fixes are enabled for low-risk filesystem and ACL issues."
     else
-        info "Report-only mode. Re-run with --interactive-fix to be prompted for safe repairs."
+        log_info "Report-only mode. Re-run with --interactive-fix to be prompted for safe repairs."
     fi
     echo
 
-    if ! linux_user_exists "${site_user}"; then
+    if ! user_system_user_exists "${site_user}"; then
         health_fail "Linux site user does not exist: ${site_user}"
-        info "Website health check complete: ${MH_WEBSITE_HC_PASS_COUNT} ok, ${MH_WEBSITE_HC_WARN_COUNT} warnings, ${MH_WEBSITE_HC_FAIL_COUNT} failures."
+        log_info "Website health check complete: ${MH_WEBSITE_HC_PASS_COUNT} passed, ${MH_WEBSITE_HC_WARN_COUNT} warnings, ${MH_WEBSITE_HC_FAIL_COUNT} failures."
         exit 1
     fi
     health_ok "Linux site user exists: ${site_user}"
@@ -230,7 +230,7 @@ main_website_health_check() {
     fi
 
     echo
-    info "Website health check complete: ${MH_WEBSITE_HC_PASS_COUNT} ok, ${MH_WEBSITE_HC_WARN_COUNT} warnings, ${MH_WEBSITE_HC_FAIL_COUNT} failures."
+    log_info "Website health check complete: ${MH_WEBSITE_HC_PASS_COUNT} passed, ${MH_WEBSITE_HC_WARN_COUNT} warnings, ${MH_WEBSITE_HC_FAIL_COUNT} failures."
 
     if (( MH_WEBSITE_HC_FAIL_COUNT > 0 )); then
         exit 1

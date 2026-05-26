@@ -2,37 +2,37 @@
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 source "${repo_root}/lib/common.sh" "$@"
-require_root
-require_base_system_complete
+user_require_root
+state_require_base_system_complete
 
 # Vhost creation joins several shared systems, so every generated config is
 # validated before services are touched.
 read -rp "Primary hostname / ServerName, e.g. shop.example.com: " hostname
-validate_hostname "${hostname}" || fail "Invalid hostname: ${hostname}"
+site_validate_hostname "${hostname}" || log_fail "Invalid hostname: ${hostname}"
 
-default_site_user="$(hostname_to_username "${hostname}")"
+default_site_user="$(site_hostname_to_username "${hostname}")"
 read -rp "Linux site username [${default_site_user}]: " site_user
 site_user="${site_user:-${default_site_user}}"
 
-validate_linux_username "${site_user}" || fail "Invalid Linux username: ${site_user}"
+user_validate_system_username "${site_user}" || log_fail "Invalid Linux username: ${site_user}"
 
 read -rp "Laravel site? [Y/n]: " is_laravel
 is_laravel="${is_laravel:-Y}"
 
-if ! is_site_user_ready "${site_user}" "${is_laravel}"; then
+if ! site_user_is_ready "${site_user}" "${is_laravel}"; then
     rc=$?
-    warn "Website user is not ready for vhost creation."
-    warn "Expected user: ${site_user}"
-    warn "Expected site root: $(site_root_for_user "${site_user}")"
-    warn "Expected document root: $(site_docroot_for_user "${site_user}" "${is_laravel}")"
-    fail "Run first: sudo ./scripts/user_website.sh"
+    log_warn "Website user is not ready for vhost creation."
+    log_warn "Expected user: ${site_user}"
+    log_warn "Expected site root: $(site_root_for_user "${site_user}")"
+    log_warn "Expected document root: $(site_docroot_for_user "${site_user}" "${is_laravel}")"
+    log_fail "Run first: sudo ./scripts/user_website.sh"
 fi
 
 read -rp "Extra hostnames / ServerAlias, space-separated or blank: " server_aliases
 
 read -rp "PHP version [${DEFAULT_PHP_VERSION}]: " php_version
 php_version="${php_version:-${DEFAULT_PHP_VERSION}}"
-require_php_fpm_version "${php_version}" || fail "PHP-FPM ${php_version} is not installed. No vhost or pool files were written."
+fpm_version_exists "${php_version}" || log_fail "PHP-FPM ${php_version} is not installed. No vhost or pool files were written."
 
 echo
 echo "SSL certificate options:"
@@ -44,24 +44,24 @@ cert_choice="${cert_choice:-1}"
 if [[ "${cert_choice}" == "2" ]]; then
     "${REPO_ROOT}/scripts/website_import_paid_certificate.sh"
 elif [[ "${cert_choice}" != "1" ]]; then
-    fail "Invalid certificate choice: ${cert_choice}"
+    log_fail "Invalid certificate choice: ${cert_choice}"
 fi
 
 default_cert_folder="${hostname#*.}"
 read -rp "Certificate folder/domain [${default_cert_folder}]: " cert_folder
 cert_folder="${cert_folder:-${default_cert_folder}}"
 
-require_certificate_files "${cert_folder}" || fail "Missing certificate files for ${cert_folder}. No vhost or pool files were written."
+cert_files_exist "${cert_folder}" || log_fail "Missing certificate files for ${cert_folder}. No vhost or pool files were written."
 
-cert_dir="$(certificate_dir_for_name "${cert_folder}")"
+cert_dir="$(cert_directory_for_name "${cert_folder}")"
 fullchain="${cert_dir}/fullchain.pem"
 privkey="${cert_dir}/privkey.pem"
 
-if check_cert_covers_hostname "${fullchain}" "${hostname}"; then
-    ok "Certificate appears to cover ${hostname}."
+if cert_covers_hostname "${fullchain}" "${hostname}"; then
+    log_ok "Certificate appears to cover ${hostname}."
 else
-    warn "Certificate may not cover ${hostname}."
-    confirm "Continue anyway?" || exit 1
+    log_warn "Certificate may not cover ${hostname}."
+    prompt_confirm "Continue anyway?" || exit 1
 fi
 
 site_home="$(site_home_for_user "${site_user}")"
@@ -73,7 +73,7 @@ pool_file="/etc/php/${php_version}/fpm/pool.d/${site_user}.conf"
 # legacy PHP usage explicit at the site boundary.
 tmp_pool="$(mktemp)"
 cat >"${tmp_pool}" <<EOF
-$(managed_header "website_create_https_vhost.sh")
+$(file_managed_header "website_create_https_vhost.sh")
 [${site_user}]
 user = ${site_user}
 group = ${site_user}
@@ -97,7 +97,7 @@ php_admin_flag[log_errors] = on
 catch_workers_output = yes
 EOF
 
-write_managed_file "${pool_file}" 0644 root:root "${tmp_pool}" || fail "Could not write PHP-FPM pool. Apache vhosts were not enabled."
+file_write_managed "${pool_file}" 0644 root:root "${tmp_pool}" || log_fail "Could not write PHP-FPM pool. Apache vhosts were not enabled."
 
 server_alias_line=""
 if [[ -n "${server_aliases}" ]]; then
@@ -111,7 +111,7 @@ https_vhost="/etc/apache2/sites-available/${hostname}-ssl.conf"
 # the HTTPS vhost below.
 tmp_http="$(mktemp)"
 cat >"${tmp_http}" <<EOF
-$(managed_header "website_create_https_vhost.sh")
+$(file_managed_header "website_create_https_vhost.sh")
 <VirtualHost *:80>
     ServerName ${hostname}
 ${server_alias_line}
@@ -125,7 +125,7 @@ EOF
 
 tmp_https="$(mktemp)"
 cat >"${tmp_https}" <<EOF
-$(managed_header "website_create_https_vhost.sh")
+$(file_managed_header "website_create_https_vhost.sh")
 <IfModule mod_ssl.c>
 <VirtualHost *:443>
     ServerName ${hostname}
@@ -163,14 +163,14 @@ ${server_alias_line}
 </IfModule>
 EOF
 
-write_managed_file "${http_vhost}" 0644 root:root "${tmp_http}" || fail "Could not write HTTP vhost. Site was not enabled."
-write_managed_file "${https_vhost}" 0644 root:root "${tmp_https}" || fail "Could not write HTTPS vhost. Site was not enabled."
+file_write_managed "${http_vhost}" 0644 root:root "${tmp_http}" || log_fail "Could not write HTTP vhost. Site was not enabled."
+file_write_managed "${https_vhost}" 0644 root:root "${tmp_https}" || log_fail "Could not write HTTPS vhost. Site was not enabled."
 
-run a2ensite "${hostname}.conf" || fail "Could not enable HTTP vhost for ${hostname}. Apache was not reloaded."
-run a2ensite "${hostname}-ssl.conf" || fail "Could not enable HTTPS vhost for ${hostname}. Apache was not reloaded."
+log_run a2ensite "${hostname}.conf" || log_fail "Could not enable HTTP vhost for ${hostname}. Apache was not reloaded."
+log_run a2ensite "${hostname}-ssl.conf" || log_fail "Could not enable HTTPS vhost for ${hostname}. Apache was not reloaded."
 # PHP-FPM is restarted first so Apache never points at a pool configuration that
 # has not been accepted by the PHP-FPM daemon.
-restart_php_fpm_safely "${php_version}" || fail "PHP-FPM ${php_version} validation or restart failed. Apache was not reloaded."
-reload_apache_safely || fail "Apache config validation or reload failed. The vhost files may be written/enabled, but Apache kept its previous running config."
+fpm_restart_safely "${php_version}" || log_fail "PHP-FPM ${php_version} validation or restart failed. Apache was not reloaded."
+apache_reload_safely || log_fail "Apache config validation or reload failed. The vhost files may be written/enabled, but Apache kept its previous running config."
 
-ok "HTTPS site created for ${hostname}."
+log_ok "HTTPS site created for ${hostname}."

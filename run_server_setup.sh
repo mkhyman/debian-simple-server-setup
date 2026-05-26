@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${script_dir}/lib/common.sh" "$@"
-require_root
+user_require_root
 
 menu_entries=(
     "core|core_base_system.sh|Base system setup"
@@ -27,7 +27,7 @@ run_selected_script() {
     local description="$2"
 
     if [[ ! -x "${REPO_ROOT}/scripts/${rel_script}" ]]; then
-        warn "Script is missing or not executable: scripts/${rel_script}"
+        log_warn "Script is missing or not executable: scripts/${rel_script}"
         read -rp "Press Enter to continue..."
         return 1
     fi
@@ -45,11 +45,11 @@ run_selected_script() {
     fi
 }
 
-if ! base_system_complete; then
+if ! state_base_system_complete; then
     echo
     echo "Base system setup has not been completed yet."
     echo
-    echo "This must be run before the other toolkit scripts because it creates:"
+    echo "This must be log_run before the other toolkit scripts because it creates:"
     echo "  - the ${SERVER_ADMIN_GROUP} group"
     echo "  - runtime directories under ${SERVER_ADMIN_DIR}"
     echo "  - toolkit permissions"
@@ -57,7 +57,7 @@ if ! base_system_complete; then
     echo "  - fail2ban and unattended security updates"
     echo
 
-    if confirm "Run core_base_system.sh now?"; then
+    if prompt_confirm "Run core_base_system.sh now?"; then
         run_selected_script "core_base_system.sh" "Base system setup"
     else
         echo
@@ -92,15 +92,15 @@ while true; do
 
     echo "  Q) Quit"
     echo
-    read -rp "Choose script to run: " choice
+    read -rp "Choose script to log_run: " choice
 
     if [[ "${choice}" =~ ^[Qq]$ ]]; then
-        ok "Exiting."
+        log_ok "Exiting."
         exit 0
     fi
 
     if [[ ! "${choice}" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#menu_entries[@]} )); then
-        warn "Invalid choice."
+        log_warn "Invalid choice."
         read -rp "Press Enter to continue..."
         continue
     fi
@@ -110,6 +110,6 @@ while true; do
     run_selected_script "${file}" "${description}"
 
     echo
-    ok "Finished: ${file}"
+    log_ok "Finished: ${file}"
     read -rp "Press Enter to return to menu..."
 done

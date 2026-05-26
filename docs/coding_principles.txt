@@ -34,9 +34,9 @@ Function names use lowercase words separated by underscores.
 
 Examples:
 
-    reload_apache_safely
-    validate_sshd_config
-    write_managed_file
+    apache_reload_safely
+    ssh_validate_daemon_config
+    file_write_managed
 
 Local variables use lowercase words separated by underscores.
 
@@ -113,11 +113,11 @@ one clear maintenance point.
 
 Prefer this:
 
-    reload_apache_safely
+    apache_reload_safely
 
 rather than repeating this everywhere:
 
-    apachectl configtest && systemctl reload apache2
+    apache_validate_config && svc_reload apache2
 
 That way, if Debian changes service management details later, there is one place
 to adapt the project.
@@ -176,12 +176,12 @@ next command already says.
 Poor comment:
 
     # Reload Apache.
-    reload_apache_safely
+    apache_reload_safely
 
 Better comment:
 
     # Validate before reloading so one bad vhost does not take every site down.
-    reload_apache_safely
+    apache_reload_safely
 
 Assume the reader can understand ordinary shell commands. Use comments for the
 operational reason, security reason, historical reason or maintenance trap.
@@ -315,3 +315,41 @@ This keeps the calling code in control of consequences. It also makes functions
 safer to reuse later without discovering that they secretly printed output,
 changed global state, or modified the server.
 
+
+
+Library structure and namespaces
+--------------------------------
+
+lib/common.sh is the public include point. It should resolve configuration,
+source focused libraries and initialise shared state. It should not become a
+large mixed library itself.
+
+Focused libraries should provide reusable vocabulary, not hidden workflow.
+Calling scripts should decide control flow, user-facing messages and whether a
+reported problem should be fixed.
+
+Library functions should be namespaced with a short, obvious prefix followed by
+an underscore. Prefer obvious names over saving one character.
+
+Current prefixes:
+
+  log_     logging and command logging
+  prompt_  generic interactive prompts only
+  svc_     generic service operations
+  file_    file writes, backups and toolkit file permissions
+  user_    system user and group helpers
+  ssh_     SSH authorized_keys and sshd configuration helpers
+  site_    website path, layout and ACL helpers
+  cert_    certificate path and validation helpers
+  apache_  Apache-specific validation/reload wrappers
+  fpm_     PHP-FPM-specific validation/restart wrappers
+  mariadb_ MariaDB-specific validation/restart wrappers
+  redis_   Redis-specific restart wrappers
+
+Generic primitives should come first, with domain-specific mapper functions
+calling them. For example, apache_reload_safely should validate Apache and then
+call svc_reload "apache2" rather than invoking systemctl directly.
+
+Do not mix vocabulary for the same concept. For example, do not use group,
+linux_group and system_group interchangeably. Pick the project vocabulary and
+use it consistently.

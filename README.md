@@ -41,10 +41,21 @@ If the files have passed through Windows/WSL, normalise line endings:
 find . -type f -not -path "./.git/*" -exec dos2unix {} +
 ```
 
+Prepare the toolkit permissions. This is the one script that may need its
+execute bit set manually after the first clone/upload/extract:
+
+```bash
+chmod +x bootstrap_permissions.sh
+sudo ./bootstrap_permissions.sh
+```
+
+The bootstrap script prepares the server-admin toolkit itself. It does not
+configure the server.
+
 Run the menu:
 
 ```bash
-./run_server_setup.sh
+sudo ./run_server_setup.sh
 ```
 
 The first menu run checks whether base system setup has completed. If not, it offers to run it first.

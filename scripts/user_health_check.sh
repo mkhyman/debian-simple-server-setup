@@ -2,15 +2,15 @@
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 source "${repo_root}/lib/common.sh" "$@"
-require_root
-require_base_system_complete
+user_require_root
+state_require_base_system_complete
 
 MH_USER_HC_PASS_COUNT=0
 MH_USER_HC_WARN_COUNT=0
 MH_USER_HC_FAIL_COUNT=0
 
-health_ok() { ok "$*"; MH_USER_HC_PASS_COUNT=$((MH_USER_HC_PASS_COUNT+1)); }
-health_warn() { warn "$*"; MH_USER_HC_WARN_COUNT=$((MH_USER_HC_WARN_COUNT+1)); }
+health_ok() { log_ok "$*"; MH_USER_HC_PASS_COUNT=$((MH_USER_HC_PASS_COUNT+1)); }
+health_warn() { log_warn "$*"; MH_USER_HC_WARN_COUNT=$((MH_USER_HC_WARN_COUNT+1)); }
 health_fail() { echo "[FAIL] $*"; echo "[FAIL] $*" >>"${LOG_FILE}"; MH_USER_HC_FAIL_COUNT=$((MH_USER_HC_FAIL_COUNT+1)); }
 
 maybe_fix_dir() {
@@ -23,7 +23,7 @@ maybe_fix_dir() {
 
     [[ "${interactive_fix}" == "yes" ]] || return 0
     echo "${reason}"
-    if confirm "Set ${path} to ${owner}:${group} ${mode} now?"; then
+    if prompt_confirm "Set ${path} to ${owner}:${group} ${mode} now?"; then
         install -d -m "${mode}" -o "${owner}" -g "${group}" "${path}" || { health_fail "Could not fix ${path}."; return 1; }
         health_ok "Fixed ${path}."
     fi
@@ -39,7 +39,7 @@ maybe_fix_file() {
 
     [[ "${interactive_fix}" == "yes" ]] || return 0
     echo "${reason}"
-    if confirm "Set ${path} to ${owner}:${group} ${mode} now?"; then
+    if prompt_confirm "Set ${path} to ${owner}:${group} ${mode} now?"; then
         touch "${path}" || { health_fail "Could not create ${path}."; return 1; }
         chown "${owner}:${group}" "${path}" || { health_fail "Could not chown ${path}."; return 1; }
         chmod "${mode}" "${path}" || { health_fail "Could not chmod ${path}."; return 1; }
@@ -102,20 +102,20 @@ main_user_health_check() {
         read -rp "Linux username to check: " target_user
     fi
 
-    validate_linux_username "${target_user}" || fail "Invalid Linux username: ${target_user}"
+    user_validate_system_username "${target_user}" || log_fail "Invalid Linux username: ${target_user}"
 
     echo
-    info "Running user health check for ${target_user}."
+    log_info "Running user health check for ${target_user}."
     if [[ "${interactive_fix}" == "yes" ]]; then
-        info "Interactive fixes are enabled for low-risk filesystem issues."
+        log_info "Interactive fixes are enabled for low-risk filesystem issues."
     else
-        info "Report-only mode. Re-run with --interactive-fix to be prompted for safe repairs."
+        log_info "Report-only mode. Re-run with --interactive-fix to be prompted for safe repairs."
     fi
     echo
 
-    if ! linux_user_exists "${target_user}"; then
+    if ! user_system_user_exists "${target_user}"; then
         health_fail "Linux user does not exist: ${target_user}"
-        info "User health check complete: ${MH_USER_HC_PASS_COUNT} ok, ${MH_USER_HC_WARN_COUNT} warnings, ${MH_USER_HC_FAIL_COUNT} failures."
+        log_info "User health check complete: ${MH_USER_HC_PASS_COUNT} passed, ${MH_USER_HC_WARN_COUNT} warnings, ${MH_USER_HC_FAIL_COUNT} failures."
         exit 1
     fi
     health_ok "Linux user exists: ${target_user}"
@@ -154,7 +154,7 @@ main_user_health_check() {
     fi
 
     echo
-    info "User health check complete: ${MH_USER_HC_PASS_COUNT} ok, ${MH_USER_HC_WARN_COUNT} warnings, ${MH_USER_HC_FAIL_COUNT} failures."
+    log_info "User health check complete: ${MH_USER_HC_PASS_COUNT} passed, ${MH_USER_HC_WARN_COUNT} warnings, ${MH_USER_HC_FAIL_COUNT} failures."
 
     if (( MH_USER_HC_FAIL_COUNT > 0 )); then
         exit 1
