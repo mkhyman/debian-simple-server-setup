@@ -84,8 +84,8 @@ while true; do
             IFS='|' read -r entry_group file description <<<"${entry}"
             if [[ "${entry_group}" == "${group}" ]]; then
                 printf "  %2d) %-45s %s\n" "${index}" "${file}" "${description}"
+                index=$((index+1))
             fi
-            index=$((index+1))
         done
         echo
     done
