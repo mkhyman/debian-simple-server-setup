@@ -11,9 +11,9 @@ mariadb_validate_config() {
     # MariaDB validation differs a little across releases. Prefer the explicit
     # validator when present, and fall back to the server's config-parsing path.
     if mariadbd --help --verbose 2>&1 | grep -q -- '--validate-config'; then
-        log_run mariadbd --validate-config
+        mariadbd --validate-config
     else
-        log_run mysqld --verbose --help
+        mysqld --verbose --help
     fi
 }
 

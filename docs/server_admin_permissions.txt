@@ -1,0 +1,89 @@
+Server admin toolkit permissions
+================================
+
+Purpose
+-------
+
+The server-admin toolkit is normally installed under:
+
+    /server-admin
+
+The expected operating model is:
+
+    - initial deployment may be performed by root
+    - later maintenance may be performed by a non-root admin user
+    - admin users should be able to update the toolkit, for example by running
+      git pull
+    - sensitive certificate private keys should remain root-only
+
+This is why the toolkit uses a deliberately split permission model.
+
+
+General toolkit directories
+---------------------------
+
+Most server-admin directories use:
+
+    owner: root
+    group: server_admin
+    mode:  2770
+
+Example:
+
+    /server-admin          root:server_admin 2770
+    /server-admin/logs     root:server_admin 2770
+    /server-admin/backups  root:server_admin 2770
+    /server-admin/.state   root:server_admin 2770
+
+Mode 2770 means:
+
+    - root has full access
+    - members of server_admin have full access
+    - other users have no access
+    - the setgid bit causes new files/directories to inherit the server_admin
+      group
+
+The setgid bit is intentional. It prevents a later admin user from running git
+pull or editing toolkit files and accidentally creating files owned by their
+personal primary group, which could make future maintenance awkward for another
+admin user.
+
+This is a convenience boundary, not a secrecy boundary. Members of server_admin
+are trusted to maintain the toolkit.
+
+
+Certificate private key storage
+-------------------------------
+
+Certificate storage is the exception:
+
+    /server-admin/ssl-certificates  root:root 700
+
+This directory may contain private keys. Membership of server_admin should not
+by itself grant casual read access to private key material. Admin users can still
+manage certificates by running the relevant scripts with sudo.
+
+The toolkit permission repair function therefore applies the general
+root:server_admin 2770 model first, then explicitly re-hardens
+/server-admin/ssl-certificates to root:root 700 at the end.
+
+This final hardening step exists because parent directories may use setgid, and
+old or manually altered deployments may already have inherited group bits. The
+certificate directory should always end up as root:root 700.
+
+
+Bootstrap and health checks
+---------------------------
+
+bootstrap_permissions.sh prepares the toolkit itself. It should:
+
+    - create/check the server_admin group
+    - make normal toolkit files group-maintainable
+    - keep certificate private key storage root-only
+
+core_health_check.sh checks the same model. In report-only mode it should report
+drift. With --interactive-fix it may offer to restore the expected ownership and
+modes.
+
+The key principle is that the bootstrap script and health check should agree on
+what healthy permissions look like.

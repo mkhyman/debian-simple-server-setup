@@ -25,7 +25,8 @@ if user_system_user_exists "${site_user}"; then
 else
     log_warn "Website user does not currently exist: ${site_user}"
     prompt_confirm "Create this website user?" || exit 0
-    user_ensure_system_user "${site_user}" || log_fail "Could not create website user ${site_user}. Website directories were not created."
+    log_info "Creating website user: ${site_user}."
+    user_create_system_user "${site_user}" || log_fail "Could not create website user ${site_user}. Website directories were not created."
 fi
 
 read -rp "Laravel site directories? [Y/n]: " is_laravel

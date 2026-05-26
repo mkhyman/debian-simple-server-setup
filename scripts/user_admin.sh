@@ -17,11 +17,23 @@ if user_system_user_exists "${admin_user}"; then
 else
     log_warn "Admin user does not currently exist: ${admin_user}"
     prompt_confirm "Create this admin user?" || exit 0
-    user_ensure_system_user "${admin_user}" || log_fail "Could not create admin user ${admin_user}. No sudo or SSH changes were applied for this user."
+    log_info "Creating admin user: ${admin_user}."
+    user_create_system_user "${admin_user}" || log_fail "Could not create admin user ${admin_user}. No sudo or SSH changes were applied for this user."
 fi
 
-user_ensure_in_sudo "${admin_user}" || log_fail "Could not add ${admin_user} to sudo. SSH access was not changed by this script."
-user_ensure_in_group "${admin_user}" "${SERVER_ADMIN_GROUP}" || log_fail "Could not add ${admin_user} to ${SERVER_ADMIN_GROUP}. Toolkit file access may not work for this user."
+if user_system_user_in_group "${admin_user}" "sudo"; then
+    log_info "${admin_user} is already in sudo."
+else
+    log_info "Adding ${admin_user} to sudo."
+    user_add_to_group "${admin_user}" "sudo" || log_fail "Could not add ${admin_user} to sudo. SSH access was not changed by this script."
+fi
+
+if user_system_user_in_group "${admin_user}" "${SERVER_ADMIN_GROUP}"; then
+    log_info "${admin_user} is already in ${SERVER_ADMIN_GROUP}."
+else
+    log_info "Adding ${admin_user} to ${SERVER_ADMIN_GROUP}."
+    user_add_to_group "${admin_user}" "${SERVER_ADMIN_GROUP}" || log_fail "Could not add ${admin_user} to ${SERVER_ADMIN_GROUP}. Toolkit file access may not work for this user."
+fi
 
 if prompt_confirm "Set or update local password for ${admin_user}?"; then
     passwd "${admin_user}" || log_fail "Password update failed for ${admin_user}. Continuing would leave the account in an unknown login state."

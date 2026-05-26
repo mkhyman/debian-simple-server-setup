@@ -68,28 +68,71 @@ EOF
 
 
 
-file_fix_server_admin_toolkit_permissions() {
+file_server_admin_root_permissions_match() {
+    local toolkit_root="$1"
+    local admin_group="$2"
+
+    [[ -d "${toolkit_root}" ]] || return 1
+    [[ "$(stat -c '%U:%G %a' "${toolkit_root}")" == "root:${admin_group} 2770" ]]
+}
+
+
+file_set_server_admin_root_permissions() {
+    local toolkit_root="$1"
+    local admin_group="$2"
+
+    [[ -d "${toolkit_root}" ]] || return 1
+    user_system_group_exists "${admin_group}" || return 1
+    chown root:"${admin_group}" "${toolkit_root}" || return 1
+    chmod 2770 "${toolkit_root}"
+}
+
+
+file_set_server_admin_directory_permissions() {
     local toolkit_root="$1"
     local admin_group="$2"
 
     [[ -d "${toolkit_root}" ]] || return 1
     user_system_group_exists "${admin_group}" || return 1
 
-    # The toolkit, including its Git metadata, is group-maintainable so admin
-    # users can update it without sudo. Private certificate material stays
-    # outside this repair path because it has stricter root-only rules.
-    chgrp "${admin_group}" "${toolkit_root}" || return 1
-    chmod 2770 "${toolkit_root}" || return 1
+    find "${toolkit_root}"         -path "${SERVER_ADMIN_SSL_DIR}" -prune -o         -type d -exec chown root:"${admin_group}" {} + -exec chmod 2770 {} +
+}
 
-    find "${toolkit_root}" \
-        -path "${SERVER_ADMIN_SSL_DIR}" -prune -o \
-        -type d -exec chgrp "${admin_group}" {} + -exec chmod 2770 {} + || return 1
 
-    find "${toolkit_root}" \
-        -path "${SERVER_ADMIN_SSL_DIR}" -prune -o \
-        -type f -name "*.sh" -exec chgrp "${admin_group}" {} + -exec chmod 770 {} + || return 1
+file_set_server_admin_script_permissions() {
+    local toolkit_root="$1"
+    local admin_group="$2"
 
-    find "${toolkit_root}" \
-        -path "${SERVER_ADMIN_SSL_DIR}" -prune -o \
-        -type f ! -name "*.sh" -exec chgrp "${admin_group}" {} + -exec chmod 660 {} + || return 1
+    [[ -d "${toolkit_root}" ]] || return 1
+    user_system_group_exists "${admin_group}" || return 1
+
+    find "${toolkit_root}"         -path "${SERVER_ADMIN_SSL_DIR}" -prune -o         -type f -name "*.sh" -exec chown root:"${admin_group}" {} + -exec chmod 770 {} +
+}
+
+
+file_set_server_admin_regular_file_permissions() {
+    local toolkit_root="$1"
+    local admin_group="$2"
+
+    [[ -d "${toolkit_root}" ]] || return 1
+    user_system_group_exists "${admin_group}" || return 1
+
+    find "${toolkit_root}"         -path "${SERVER_ADMIN_SSL_DIR}" -prune -o         -type f ! -name "*.sh" -exec chown root:"${admin_group}" {} + -exec chmod 660 {} +
+}
+
+
+file_harden_server_admin_ssl_directory() {
+    local ssl_dir="${1:-${SERVER_ADMIN_SSL_DIR}}"
+
+    [[ -d "${ssl_dir}" ]] || return 1
+    chown root:root "${ssl_dir}" || return 1
+    chmod 700 "${ssl_dir}"
+}
+
+
+file_server_admin_ssl_directory_permissions_match() {
+    local ssl_dir="${1:-${SERVER_ADMIN_SSL_DIR}}"
+
+    [[ -d "${ssl_dir}" ]] || return 1
+    [[ "$(stat -c '%U:%G %a' "${ssl_dir}")" == "root:root 700" ]]
 }

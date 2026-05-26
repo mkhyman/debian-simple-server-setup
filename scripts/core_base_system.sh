@@ -47,8 +47,20 @@ install -d -o root -g "${SERVER_ADMIN_GROUP}" -m 2770 "${SERVER_ADMIN_STATE_DIR}
 # Website private keys live here, so this directory is intentionally root-only.
 install -d -o root -g root -m 700 "${SERVER_ADMIN_SSL_DIR}"     || log_fail "Could not create SSL certificate directory: ${SERVER_ADMIN_SSL_DIR}."
 
-log_info "Hardening toolkit repository permissions."
-file_fix_server_admin_toolkit_permissions "${SERVER_ADMIN_DIR}" "${SERVER_ADMIN_GROUP}"     || log_fail "Could not harden toolkit permissions. Some files may be partially updated."
+log_info "Setting shared toolkit root permissions."
+file_set_server_admin_root_permissions "${SERVER_ADMIN_DIR}" "${SERVER_ADMIN_GROUP}"     || log_fail "Could not set ${SERVER_ADMIN_DIR} to root:${SERVER_ADMIN_GROUP} 2770."
+
+log_info "Setting shared toolkit directory permissions."
+file_set_server_admin_directory_permissions "${SERVER_ADMIN_DIR}" "${SERVER_ADMIN_GROUP}"     || log_fail "Could not set server-admin directory permissions. Some paths may be partially updated."
+
+log_info "Making toolkit shell scripts executable by server-admin users."
+file_set_server_admin_script_permissions "${SERVER_ADMIN_DIR}" "${SERVER_ADMIN_GROUP}"     || log_fail "Could not set server-admin script permissions. Some paths may be partially updated."
+
+log_info "Making toolkit non-script files group-maintainable."
+file_set_server_admin_regular_file_permissions "${SERVER_ADMIN_DIR}" "${SERVER_ADMIN_GROUP}"     || log_fail "Could not set server-admin file permissions. Some paths may be partially updated."
+
+log_info "Restricting SSL certificate storage to root only."
+file_harden_server_admin_ssl_directory "${SERVER_ADMIN_SSL_DIR}"     || log_fail "Could not harden SSL certificate directory: ${SERVER_ADMIN_SSL_DIR}."
 
 # SSH is the first exposed service on a new host, so fail2ban is configured in
 # the base layer rather than waiting for the web stack.

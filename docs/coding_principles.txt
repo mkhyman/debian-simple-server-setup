@@ -155,6 +155,34 @@ This separation keeps checks reusable and avoids hidden side effects. In Bash,
 where there are no classes or real namespaces, this matters more than it would in
 a more structured language.
 
+
+Library functions and script control flow
+-----------------------------------------
+
+Shared libraries should provide small, reusable facts and actions. They should
+not normally decide what is displayed to the user, whether a failure is fatal, or
+whether an interactive repair should be offered.
+
+A library helper may answer a question:
+
+    svc_is_active apache2
+
+or perform one clear action:
+
+    svc_reload apache2
+    file_harden_server_admin_ssl_directory
+
+The calling script should decide the surrounding workflow:
+
+    - print INFO/WARN/FAIL messages
+    - prompt the user
+    - retry or repair
+    - exit or continue
+
+Wrapper functions are acceptable when the same sequence is genuinely reused in
+multiple places, but they should still be made from smaller primitives. Avoid
+hiding one-off script workflow inside common libraries.
+
 Abstraction philosophy
 ----------------------
 
@@ -353,3 +381,15 @@ call svc_reload "apache2" rather than invoking systemctl directly.
 Do not mix vocabulary for the same concept. For example, do not use group,
 linux_group and system_group interchangeably. Pick the project vocabulary and
 use it consistently.
+Server-admin toolkit permissions
+--------------------------------
+
+The server-admin toolkit uses a split permission model. Normal toolkit files may
+be group-maintainable by server_admin so non-root admin users can run git pull
+and maintain the scripts. Certificate private key storage is different and must
+remain root:root 700.
+
+Permission repair code must preserve that exception explicitly. Broad chmod/chgrp
+operations should be followed by a final re-hardening step for root-only secret
+storage where needed.
+

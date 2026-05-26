@@ -29,11 +29,29 @@ fi
 if user_system_group_exists "${SERVER_ADMIN_GROUP}"; then
     log_info "Server admin group already exists: ${SERVER_ADMIN_GROUP}."
 else
+    log_info "Creating server admin group: ${SERVER_ADMIN_GROUP}."
     user_create_system_group "${SERVER_ADMIN_GROUP}" \
         || log_fail "Could not create server admin group: ${SERVER_ADMIN_GROUP}. Toolkit permissions were not changed."
 fi
 
-file_fix_server_admin_toolkit_permissions "${SERVER_ADMIN_DIR}" "${SERVER_ADMIN_GROUP}" \
-    || log_fail "Could not prepare toolkit permissions. Some paths may have been partially changed."
+log_info "Setting shared toolkit root permissions."
+file_set_server_admin_root_permissions "${SERVER_ADMIN_DIR}" "${SERVER_ADMIN_GROUP}" \
+    || log_fail "Could not set ${SERVER_ADMIN_DIR} to root:${SERVER_ADMIN_GROUP} 2770."
+
+log_info "Setting shared toolkit directory permissions."
+file_set_server_admin_directory_permissions "${SERVER_ADMIN_DIR}" "${SERVER_ADMIN_GROUP}" \
+    || log_fail "Could not set server-admin directory permissions. Some paths may have been partially changed."
+
+log_info "Making toolkit shell scripts executable by server-admin users."
+file_set_server_admin_script_permissions "${SERVER_ADMIN_DIR}" "${SERVER_ADMIN_GROUP}" \
+    || log_fail "Could not set server-admin script permissions. Some paths may have been partially changed."
+
+log_info "Making toolkit non-script files group-maintainable."
+file_set_server_admin_regular_file_permissions "${SERVER_ADMIN_DIR}" "${SERVER_ADMIN_GROUP}" \
+    || log_fail "Could not set server-admin file permissions. Some paths may have been partially changed."
+
+log_info "Restricting SSL certificate storage to root only."
+file_harden_server_admin_ssl_directory "${SERVER_ADMIN_SSL_DIR}" \
+    || log_fail "Could not harden SSL certificate storage: ${SERVER_ADMIN_SSL_DIR}."
 
 log_ok "Toolkit permissions prepared."

@@ -138,3 +138,5 @@ The base system script must be run before the other scripts. Directly-run script
 `config.sh` is local server state and should not be committed.
 
 The repository is group-maintainable via the `server_admin` group, while sensitive certificate private keys remain root-only.
+
+See `docs/server_admin_permissions.txt` for the reasoning behind the toolkit permission model.

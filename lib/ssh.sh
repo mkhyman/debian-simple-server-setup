@@ -129,45 +129,69 @@ ssh_daemon_main_config_has_fragment_include() {
 }
 
 
-ssh_ensure_daemon_config_fragments_enabled() {
-    local sshd_config sshd_config_dir tmp_original tmp_new
-    sshd_config="$(ssh_daemon_main_config_path)"
-    sshd_config_dir="$(ssh_daemon_config_dir_path)"
+ssh_create_daemon_config_dir() {
+    install -d -m 755 -o root -g root "$(ssh_daemon_config_dir_path)"
+}
 
-    install -d -m 755 -o root -g root "${sshd_config_dir}" || return 1
 
-    if ssh_daemon_main_config_has_fragment_include; then
-        log_info "SSH config fragments are already enabled in ${sshd_config}."
-        return 0
-    fi
-
-    # This is intentionally not interactive: the managed fragment cannot be a
-    # safe source of truth unless sshd actually includes the fragment directory.
-    file_backup "${sshd_config}" || return 1
-    tmp_original="$(mktemp)"
-    tmp_new="$(mktemp)"
-    cp -a "${sshd_config}" "${tmp_original}" || { rm -f "${tmp_original}" "${tmp_new}"; return 1; }
+ssh_write_main_config_with_fragment_include() {
+    local sshd_config="$1"
+    local destination="$2"
 
     {
         echo "Include /etc/ssh/sshd_config.d/*.conf"
         echo
         cat "${sshd_config}"
-    } > "${tmp_new}" || { rm -f "${tmp_original}" "${tmp_new}"; return 1; }
+    } > "${destination}"
+}
 
-    cp "${tmp_new}" "${sshd_config}" || { rm -f "${tmp_original}" "${tmp_new}"; return 1; }
-    chown root:root "${sshd_config}" || { cp "${tmp_original}" "${sshd_config}"; rm -f "${tmp_original}" "${tmp_new}"; return 1; }
-    chmod 644 "${sshd_config}" || { cp "${tmp_original}" "${sshd_config}"; rm -f "${tmp_original}" "${tmp_new}"; return 1; }
 
-    log_info "SSH config fragments were not enabled. Added Include /etc/ssh/sshd_config.d/*.conf to ${sshd_config}."
+ssh_install_main_config_candidate() {
+    local candidate="$1"
+    local sshd_config
+    sshd_config="$(ssh_daemon_main_config_path)"
 
-    if ! ssh_validate_daemon_config; then
-        log_warn "Restoring ${sshd_config} because enabling SSH config fragments did not validate."
-        cp "${tmp_original}" "${sshd_config}" || true
+    cp "${candidate}" "${sshd_config}" || return 1
+    chown root:root "${sshd_config}" || return 1
+    chmod 644 "${sshd_config}"
+}
+
+
+ssh_restore_main_config_from_backup() {
+    local backup="$1"
+    local sshd_config
+    sshd_config="$(ssh_daemon_main_config_path)"
+
+    cp "${backup}" "${sshd_config}"
+}
+
+
+ssh_add_fragment_include_to_main_config() {
+    local sshd_config tmp_original tmp_new
+    sshd_config="$(ssh_daemon_main_config_path)"
+    tmp_original="$(mktemp)"
+    tmp_new="$(mktemp)"
+
+    cp -a "${sshd_config}" "${tmp_original}" || { rm -f "${tmp_original}" "${tmp_new}"; return 1; }
+    ssh_write_main_config_with_fragment_include "${sshd_config}" "${tmp_new}" || { rm -f "${tmp_original}" "${tmp_new}"; return 1; }
+    ssh_install_main_config_candidate "${tmp_new}" || { ssh_restore_main_config_from_backup "${tmp_original}" || true; rm -f "${tmp_original}" "${tmp_new}"; return 1; }
+
+    if ! ssh_validate_daemon_config >/dev/null 2>&1; then
+        ssh_restore_main_config_from_backup "${tmp_original}" || true
         rm -f "${tmp_original}" "${tmp_new}"
         return 1
     fi
 
     rm -f "${tmp_original}" "${tmp_new}"
+}
+
+
+ssh_ensure_daemon_config_fragments_enabled() {
+    ssh_create_daemon_config_dir || return 1
+    ssh_daemon_main_config_has_fragment_include && return 0
+
+    file_backup "$(ssh_daemon_main_config_path)" || return 1
+    ssh_add_fragment_include_to_main_config
 }
 
 
@@ -238,21 +262,19 @@ ssh_ensure_daemon_allow_user() {
 
     ssh_write_daemon_managed_fragment "${permit_root_login_no}" "${username}" || return 1
     ssh_reload_safely || return 1
-    log_info "SSH AllowUsers is managed in $(ssh_daemon_managed_config_path) and includes ${username}."
 }
 
 
 ssh_ensure_daemon_root_login_disabled() {
     ssh_write_daemon_managed_fragment "yes" || return 1
     ssh_reload_safely || return 1
-    log_info "SSH root login is disabled via $(ssh_daemon_managed_config_path)."
 }
 
 
 ssh_validate_daemon_config() {
     # SSH mistakes can lock out remote administration; validation is mandatory
     # before changing the running daemon.
-    log_run /usr/sbin/sshd -t
+    /usr/sbin/sshd -t
 }
 
 

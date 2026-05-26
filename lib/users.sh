@@ -2,9 +2,9 @@
 ###############################################################################
 # USERS HELPERS
 #
-# Sourced by lib/common.sh. Functions are namespaced because Bash has no real
-# module system. These helpers should provide reusable vocabulary; calling
-# scripts should own workflow and presentation decisions.
+# Reusable Linux user/group primitives. These functions avoid presentation;
+# scripts decide whether missing users/groups are OK, warnings, failures or
+# repair opportunities.
 ###############################################################################
 
 user_validate_system_username() {
@@ -21,53 +21,37 @@ user_system_user_exists() {
 
 user_system_group_exists() {
     local group_name="$1"
-
     getent group "${group_name}" >/dev/null 2>&1
 }
 
+
+user_system_user_in_group() {
+    local username="$1"
+    local group_name="$2"
+
+    id -nG "${username}" | tr ' ' '
+' | grep -qx "${group_name}"
+}
+
+
 user_create_system_group() {
     local group_name="$1"
-
-    log_run groupadd --system "${group_name}"
+    groupadd --system "${group_name}"
 }
 
 
 user_create_system_user() {
     local username="$1"
-
-    log_run useradd -m -s /bin/bash "${username}"
-}
-
-user_ensure_system_user() {
-    local username="$1"
-
-    if user_system_user_exists "${username}"; then
-        log_info "User already exists: ${username}"
-        return 0
-    fi
-
-    user_create_system_user "${username}"
+    useradd -m -s /bin/bash "${username}"
 }
 
 
-user_ensure_in_group() {
+user_add_to_group() {
     local username="$1"
     local group_name="$2"
 
     user_system_group_exists "${group_name}" || return 1
-
-    if id -nG "${username}" | tr ' ' '\n' | grep -qx "${group_name}"; then
-        log_info "User ${username} is already in group ${group_name}."
-        return 0
-    fi
-
-    log_run usermod -aG "${group_name}" "${username}"
-}
-
-
-user_ensure_in_sudo() {
-    local username="$1"
-    user_ensure_in_group "${username}" "sudo"
+    usermod -aG "${group_name}" "${username}"
 }
 
 
@@ -82,4 +66,3 @@ EOF
         exit 1
     fi
 }
-

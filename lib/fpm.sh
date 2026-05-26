@@ -12,7 +12,7 @@ fpm_validate_config() {
 
     # Per-site pools are generated dynamically, so test the complete PHP-FPM
     # configuration before restarting the version that serves those pools.
-    log_run "php-fpm${php_version}" -t
+    "php-fpm${php_version}" -t
 }
 
 

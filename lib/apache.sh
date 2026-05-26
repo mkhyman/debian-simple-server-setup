@@ -10,7 +10,7 @@
 apache_validate_config() {
     # Apache is shared by all hosted sites, so one bad generated vhost must be
     # caught before the daemon is reloaded and every site is put at risk.
-    log_run apache2ctl configtest
+    apache2ctl configtest
 }
 
 
