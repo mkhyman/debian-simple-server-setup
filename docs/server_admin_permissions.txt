@@ -87,3 +87,9 @@ modes.
 
 The key principle is that the bootstrap script and health check should agree on
 what healthy permissions look like.
+
+
+Implementation note:
+
+    Directory special bits should be explicitly cleared when hardening
+    /server-admin/ssl-certificates to root:root 700.

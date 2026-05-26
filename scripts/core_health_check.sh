@@ -53,6 +53,11 @@ core_hc_fix_directory_owner_mode() {
 
     [[ -d "${path}" ]] || return 1
     chown "${expected_owner}:${expected_group}" "${path}" || return 1
+
+    # Directory special bits can survive numeric chmod in some cases. Clear
+    # them before applying the expected mode so interactive repairs do not leave
+    # confusing modes such as 2700 when 700 was requested.
+    chmod u-s,g-s,-t "${path}" || return 1
     chmod "${expected_mode}" "${path}"
 }
 

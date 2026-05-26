@@ -126,6 +126,11 @@ file_harden_server_admin_ssl_directory() {
 
     [[ -d "${ssl_dir}" ]] || return 1
     chown root:root "${ssl_dir}" || return 1
+
+    # Numeric chmod on Linux directories can leave an existing setgid bit in
+    # place. Clear special bits explicitly so root-only certificate storage is
+    # truly root:root 700 rather than root:root 2700.
+    chmod u-s,g-s,-t "${ssl_dir}" || return 1
     chmod 700 "${ssl_dir}"
 }
 
