@@ -1,0 +1,14 @@
+Permission Philosophy
+=====================
+
+Principles
+----------
+Permissions should follow least privilege.
+
+Goals:
+
+- root owns security boundaries
+- predictable ownership
+- isolated site access
+- future maintainability
+- avoid accidental privilege expansion

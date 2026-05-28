@@ -8,7 +8,7 @@ This project exists to rebuild a personal Debian PHP/Laravel hosting server
 quickly, calmly and repeatably from a blank machine.
 
 It is intentionally opinionated. It is not trying to become a generic hosting
-control panel, a deployment platform or a universal provisioning framework.
+control panel, deployment platform or universal provisioning framework.
 
 Prefer simple, boring and inspectable code over clever abstraction.
 
@@ -23,7 +23,7 @@ Laravel, administered by someone who is comfortable reading shell scripts and
 server configuration files.
 
 Interactive operation is the default. Non-interactive provisioning, import/export
-systems and full control-panel behaviour can be added later only if they become
+systems and full control-panel behaviour should be added only if they become
 clearly necessary.
 
 
@@ -32,19 +32,9 @@ Naming conventions
 
 Function names use lowercase words separated by underscores.
 
-Examples:
-
-    apache_reload_safely
-    ssh_validate_daemon_config
-    file_write_managed
-
 Local variables use lowercase words separated by underscores.
 
-Examples:
-
-    local site_user
-    local interactive_fix
-    local expected_mode
+Constants use uppercase words separated by underscores.
 
 Script entrypoint functions should be namespaced to the script purpose. Do not
 use a plain main function, because scripts may be read together or sourced during
@@ -55,13 +45,6 @@ Examples:
     main_core_health_check
     main_user_health_check
     main_website_health_check
-
-Constants use uppercase words separated by underscores.
-
-Examples:
-
-    SERVER_ADMIN_DIR
-    PHP_VERSIONS
 
 Script-global mutable variables should be avoided. If they are justified, they
 must be deliberately obvious:
@@ -76,33 +59,28 @@ Examples:
     MH_WEBSITE_HC_WARN_COUNT
     MH_WEBSITE_HC_FAIL_COUNT
 
-This is a Bash project, so visibility matters. Future maintainers should be able
-to spot wider-scope state immediately.
-
-Library functions should be namespaced.
+Library functions should be namespaced with short, readable prefixes.
 
 Preferred namespaces:
 
-- log_
-- prompt_
-- svc_
-- file_
-- user_
-- ssh_
-- site_
-- cert_
-- fpm_
+    log_
+    prompt_
+    svc_
+    file_
+    user_
+    ssh_
+    site_
+    cert_
+    fpm_
+    mariadb_
+    redis_
+    apache_
 
-Prefer readable 3-4 character prefixes.
+Prefer readable 3-4 character prefixes where practical. Use a longer prefix when
+the shorter form would be unclear.
 
-Consistency matters more than perfect naming.
-
-Do not mix naming styles for the same concept.
-
-Examples:
-- system_group_exists + create_system_group
-- file_set_directory_mode
-- svc_restart
+Consistency matters more than perfect naming. Do not mix naming styles for the
+same concept.
 
 
 Variable scope
@@ -121,69 +99,45 @@ convention described above.
 Function design
 ---------------
 
-Use functions for behaviour that is repeated, risky, or likely to change between
-Debian releases.
+Functions should do one clear thing.
 
-Good candidates for functions include:
+A function may contain several OS calls if they are all part of one coherent
+operation. For example, hardening one directory may involve chown and chmod.
 
-    - service reloads and restarts
-    - configuration validation
-    - managed file writing
-    - permission setup
-    - user and path helpers
-    - certificate helpers
+Split functions when they start mixing responsibilities such as:
 
-The goal is not to abstract everything. The goal is to give important behaviour
-one clear maintenance point.
+    - checking state
+    - mutating state
+    - logging or explaining
+    - prompting
+    - deciding whether failure is fatal
+    - performing unrelated setup steps
 
-Prefer this:
+Wrappers are acceptable when they are reused, centralise risky behaviour, or make
+a repeated sequence safer and easier to maintain.
 
-    apache_reload_safely
+Avoid wrappers that merely hide control flow from the calling script.
 
-rather than repeating this everywhere:
 
-    apache_validate_config && svc_reload apache2
+Libraries and control scripts
+-----------------------------
 
-That way, if Debian changes service management details later, there is one place
-to adapt the project.
+Shared libraries provide reusable facts and actions.
 
-Single responsibility
----------------------
+Libraries should not normally decide:
 
-Keep state checks, presentation and repair actions separate where practical.
+    - what is displayed to the user
+    - whether a failure is fatal
+    - whether an interactive repair should be offered
+    - whether verbose output should be shown
 
-A function that checks a fact should normally return success or failure, and
-should not also decide what to print, increment counters, prompt the user or
-change the system.
+Control scripts own:
 
-For example, a low-level check can answer:
-
-    is the service active?
-
-The calling code should decide whether that becomes:
-
-    - an OK message
-    - a warning
-    - a failure
-    - an interactive repair offer
-    - an immediate exit
-
-Presentation helpers such as health_ok, health_warn and health_fail are allowed
-to print messages and update counters because that is their explicit purpose.
-
-Repair helpers may prompt and change the system, but their names should make
-that responsibility obvious.
-
-This separation keeps checks reusable and avoids hidden side effects. In Bash,
-where there are no classes or real namespaces, this matters more than it would in
-a more structured language.
-
-Library functions and script control flow
------------------------------------------
-
-Shared libraries should provide small, reusable facts and actions. They should
-not normally decide what is displayed to the user, whether a failure is fatal, or
-whether an interactive repair should be offered.
+    - orchestration
+    - INFO/WARN/FAIL messages
+    - prompts
+    - retry or repair decisions
+    - exit decisions
 
 A library helper may answer a question:
 
@@ -194,89 +148,71 @@ or perform one clear action:
     svc_reload apache2
     file_harden_server_admin_ssl_directory
 
-The calling script should decide the surrounding workflow:
-
-    - print INFO/WARN/FAIL messages
-    - prompt the user
-    - retry or repair
-    - exit or continue
-
-Wrapper functions are acceptable when the same sequence is genuinely reused in
-multiple places, but they should still be made from smaller primitives. Avoid
-hiding one-off script workflow inside common libraries.
-
-Abstraction philosophy
-----------------------
-
-Abstraction should make the code safer or easier to read.
-
-Do not add abstraction just to make the code look more engineered. In shell
-scripts, cleverness ages badly.
-
-Prefer direct, readable code unless a helper function removes duplication,
-centralises operational risk, or makes the caller's intent clearer.
+The calling script decides the surrounding workflow.
 
 
-Comments
---------
+Command output and logging
+--------------------------
 
-Comments should explain why something is being done, not merely repeat what the
-next command already says.
+User-facing scripts should print concise status messages.
 
-Poor comment:
+Raw stdout/stderr from noisy external commands should be captured in the script
+log under /server-admin/logs rather than dumped to the terminal in normal mode.
 
-    # Reload Apache.
-    apache_reload_safely
+Use the shared logging command helper for external commands whose output should
+be captured consistently.
 
-Better comment:
+In normal mode, command output should normally go to the log file.
 
-    # Validate before reloading so one bad vhost does not take every site down.
-    apache_reload_safely
+In verbose mode, command output may be shown to the user and also written to the
+log file.
 
-Assume the reader can understand ordinary shell commands. Use comments for the
-operational reason, security reason, historical reason or maintenance trap.
+Libraries should not read global verbosity state or decide output policy. The
+calling script chooses whether to run a command through the logging helper or to
+capture/check output directly.
+
+Avoid ad hoc redirection unless there is a clear reason.
 
 
 Failure handling
 ----------------
 
-Prefer clear failure messages over generic errors.
+Fail early on unsafe conditions.
 
-A good failure message should say:
+A failure message should say:
 
     - what failed
     - what was not done
-    - what the likely next action is, where practical
+    - what to check next where practical
 
-Example:
+Avoid messages such as:
 
-    Apache config validation failed. Apache was not reloaded.
+    Something went wrong.
 
-Do not continue after a failure if the following steps could make the system less
-safe, less reachable or harder to recover.
+Prefer messages such as:
 
-For diagnostic scripts, collect as much useful evidence as possible. For setup
-scripts, fail early when continuing would be risky.
+    Apache configuration validation failed. Apache was not reloaded.
+
+Do not continue after a failure if the next step could make the system harder to
+recover.
 
 
-Managed files
--------------
+Comments
+--------
 
-Prefer managed fragments over editing distribution-owned configuration files.
+Comments should explain why something is being done, not merely restate what the
+code already says.
 
-For example, prefer this:
+Bad:
 
-    /etc/ssh/sshd_config.d/server-admin.conf
+    # Restart Apache
+    svc_restart apache2
 
-rather than repeatedly editing this:
+Good:
 
-    /etc/ssh/sshd_config
-
-If a distribution-owned file must be altered to enable managed fragments, log an
-INFO message and back it up first.
-
-Managed-file writers should avoid unnecessary changes, show the user what is
-being managed, and back up existing files before replacement.
+    # Apache is shared by all hosted sites, so validate before reload to avoid
+    # taking every site offline because of one bad generated vhost.
+    apache_validate_config
 
 
 Health checks
@@ -284,172 +220,63 @@ Health checks
 
 Health checks are diagnostic first.
 
-By default they should report only. They should not silently change the server.
+Default mode should report only and should not change the system.
 
-A health check may support:
+Interactive repair mode may offer low-risk repairs, but it must prompt before
+changing anything.
 
-    --interactive-fix
+Health checks should separate:
 
-for low-risk repairs such as known directory modes, ownership, ACLs or SSH file
-permissions. It should explain the current state, the recommended state and why
-the fix is being offered.
+    - fact checks
+    - presentation
+    - repair actions
 
-Do not use health checks for high-risk changes such as rewriting SSH policy,
-replacing certificates, changing database credentials or deleting files. Those
-belong in explicit setup scripts.
-
-
-Security philosophy
--------------------
-
-Use least privilege where it remains understandable.
-
-For websites, prefer:
-
-    - one Linux user per site
-    - one PHP-FPM pool per site
-    - one database user per site
-    - no shared writable directories between sites
-    - Apache able to read only what it needs
-    - PHP running as the site user, not as Apache
-
-Apache may still run as the normal Apache user. The stronger boundary for PHP
-sites is the PHP-FPM pool user plus filesystem and database permissions.
-
-Legacy PHP versions may be supported when needed, but they should not be allowed
-to blur site boundaries or require broad shared write access.
+Dangerous changes belong in setup scripts, not silent health-check repair logic.
 
 
-Operational style
------------------
-
-The scripts should tell the user what they are doing with INFO messages when the
-action is important or surprising.
-
-Avoid silent magic.
-
-Avoid pretending a backup of a configuration file is a full disaster-recovery
-backup. Config backups help local rollback. Real disaster recovery also needs
-site files, .env files, uploaded media, database dumps and certificates where
-those cannot simply be reissued.
-
-
-General principle
------------------
-
-If future-you reads this repository at 2am after a server failure, the code should
-be boring, explicit and unsurprising.
-
-
-Single responsibility in shell functions
-----------------------------------------
-
-Functions should have a clear responsibility.
-
-In particular, avoid mixing these three jobs unless there is a deliberate reason:
-
-    - determine a fact
-    - display/report a result
-    - change system state
-
-A fact-checking function should normally return success or failure and avoid
-printing user-facing messages or mutating counters.
-
-A display function may print output and update health-check counters, because
-that is its explicit purpose.
-
-An orchestration function may decide what to show or whether to offer a fix based
-on the result of a fact-checking function.
-
-This keeps the calling code in control of consequences. It also makes functions
-safer to reuse later without discovering that they secretly printed output,
-changed global state, or modified the server.
-
-
-
-Library structure and namespaces
---------------------------------
-
-lib/common.sh is the public include point. It should resolve configuration,
-source focused libraries and initialise shared state. It should not become a
-large mixed library itself.
-
-Focused libraries should provide reusable vocabulary, not hidden workflow.
-Calling scripts should decide control flow, user-facing messages and whether a
-reported problem should be fixed.
-
-Library functions should be namespaced with a short, obvious prefix followed by
-an underscore. Prefer obvious names over saving one character.
-
-Current prefixes:
-
-  log_     logging and command logging
-  prompt_  generic interactive prompts only
-  svc_     generic service operations
-  file_    file writes, backups and toolkit file permissions
-  user_    system user and group helpers
-  ssh_     SSH authorized_keys and sshd configuration helpers
-  site_    website path, layout and ACL helpers
-  cert_    certificate path and validation helpers
-  apache_  Apache-specific validation/reload wrappers
-  fpm_     PHP-FPM-specific validation/restart wrappers
-  mariadb_ MariaDB-specific validation/restart wrappers
-  redis_   Redis-specific restart wrappers
-
-Generic primitives should come first, with domain-specific mapper functions
-calling them. For example, apache_reload_safely should validate Apache and then
-call svc_reload "apache2" rather than invoking systemctl directly.
-
-Do not mix vocabulary for the same concept. For example, do not use group,
-linux_group and system_group interchangeably. Pick the project vocabulary and
-use it consistently.
-
-Server-admin toolkit permissions
---------------------------------
-
-The server-admin toolkit uses a split permission model. Normal toolkit files may
-be group-maintainable by server_admin so non-root admin users can run git pull
-and maintain the scripts. Certificate private key storage is different and must
-remain root:root 700.
-
-Permission repair code must preserve that exception explicitly. Broad chmod/chgrp
-operations should be followed by a final re-hardening step for root-only secret
-storage where needed.
-
-Architecture Principles
+Configuration ownership
 -----------------------
-Single Responsibility Principle applies strongly.
 
-Functions should:
-- do one thing
-- avoid hidden control flow
-- avoid unexpected screen output
+Prefer managed fragments over editing distribution-managed files directly.
 
-Libraries:
-- reusable primitives
-- minimal logging
-- generic where practical
+For example, SSH policy should normally live in:
 
-Control scripts:
-- orchestration
-- logging
-- user messaging
-- decisions and flow control
+    /etc/ssh/sshd_config.d/server-admin.conf
 
-Wrappers are acceptable only when:
-- reused in multiple places
-- centralising risky behaviour
-- simplifying repeated sequences
+rather than being repeatedly edited into:
+
+    /etc/ssh/sshd_config
+
+If a packaged file must be edited to enable managed fragments, the script should
+back it up, explain what is happening and validate before reloading services.
 
 
-Testing Philosophy
-------------------
+Permissions and security
+------------------------
+
+Use least privilege.
+
+The general model is:
+
+    - root owns sensitive security boundaries
+    - server_admin group maintains the toolkit
+    - certificate private keys stay root-only
+    - each website has its own Linux user
+    - each website has its own PHP-FPM pool
+    - each website should have its own database user
+    - Apache reads public files and proxies to PHP-FPM
+    - PHP-FPM runs application code as the site user
+
+Avoid shared writable paths unless there is a specific reason.
+
+
+Testing
+-------
+
 Local testing should normally use a disposable Debian WSL environment.
 
-Target Debian versions should be explicit.
+Target Debian versions should be explicit. Debian 13 is the current target until
+a later Debian release has been tested and deliberately adopted.
 
-Example:
-Debian 13 until Debian 14 has been tested and approved.
-
-Always validate important changes on a clean Debian environment and
-perform occasional real-server verification.
+Important changes should still be verified on a clean Debian server or VM before
+being trusted for real hosting.
