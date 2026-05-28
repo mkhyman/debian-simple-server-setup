@@ -165,8 +165,11 @@ validate_pem_cert_balance "${cert_dst}" || log_fail "Invalid generated cert.pem.
 validate_pem_cert_balance "${fullchain_dst}" || log_fail "Invalid generated fullchain.pem. Certificate files were written but did not pass validation."
 [[ -f "${chain_dst}" ]] && validate_pem_cert_balance "${chain_dst}" || true
 
-cert_pub_hash="$(openssl x509 -in "${cert_dst}" -pubkey -noout | openssl pkey -pubin -outform DER | openssl sha256)" || log_fail "Could not derive public key from certificate. Certificate import is incomplete."
-key_pub_hash="$(openssl pkey -in "${key_dst}" -pubout -outform DER | openssl sha256)" || log_fail "Could not derive public key from private key. Certificate import is incomplete."
+cert_pub_hash="$(openssl x509 -in "${cert_dst}" -pubkey -noout 2>>"${LOG_FILE}" \
+    | openssl pkey -pubin -outform DER 2>>"${LOG_FILE}" \
+    | openssl sha256 2>>"${LOG_FILE}")" || log_fail "Could not derive public key from certificate. Certificate import is incomplete."
+key_pub_hash="$(openssl pkey -in "${key_dst}" -pubout -outform DER 2>>"${LOG_FILE}" \
+    | openssl sha256 2>>"${LOG_FILE}")" || log_fail "Could not derive public key from private key. Certificate import is incomplete."
 [[ "${cert_pub_hash}" == "${key_pub_hash}" ]] || log_fail "Private key does not match certificate. Certificate files were written but should not be used."
 
 {

@@ -15,14 +15,20 @@ echo
 [[ "${db_name}" =~ ^[a-zA-Z0-9_]+$ ]] || log_fail "Invalid database name."
 [[ "${db_user}" =~ ^[a-zA-Z0-9_]+$ ]] || log_fail "Invalid database username."
 
-if ! mysql <<SQL
+sql_file="$(mktemp)"
+trap 'rm -f "${sql_file}"' EXIT
+chmod 600 "${sql_file}" || log_fail "Could not secure temporary SQL file. MariaDB user/database creation was not attempted."
+
+cat >"${sql_file}" <<SQL
 CREATE DATABASE IF NOT EXISTS \`${db_name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${db_user}'@'${db_host}' IDENTIFIED BY '${db_pass}' REQUIRE SSL;
 ALTER USER '${db_user}'@'${db_host}' IDENTIFIED BY '${db_pass}' REQUIRE SSL;
 GRANT ALL PRIVILEGES ON \`${db_name}\`.* TO '${db_user}'@'${db_host}';
 FLUSH PRIVILEGES;
 SQL
-then
+
+log_info "Creating/updating MariaDB database and SSL-required user."
+if ! log_run mariadb_socket_query <"${sql_file}"; then
     log_fail "MariaDB user/database creation failed. The database or user may be partially created; check MariaDB before rerunning."
 fi
 

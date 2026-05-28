@@ -170,7 +170,7 @@ log_run a2ensite "${hostname}.conf" || log_fail "Could not enable HTTP vhost for
 log_run a2ensite "${hostname}-ssl.conf" || log_fail "Could not enable HTTPS vhost for ${hostname}. Apache was not reloaded."
 # PHP-FPM is restarted first so Apache never points at a pool configuration that
 # has not been accepted by the PHP-FPM daemon.
-fpm_restart_safely "${php_version}" || log_fail "PHP-FPM ${php_version} validation or restart failed. Apache was not reloaded."
-apache_reload_safely || log_fail "Apache config validation or reload failed. The vhost files may be written/enabled, but Apache kept its previous running config."
+log_run fpm_restart_safely "${php_version}" || log_fail "PHP-FPM ${php_version} validation or restart failed. Apache was not reloaded."
+log_run apache_reload_safely || log_fail "Apache config validation or reload failed. The vhost files may be written/enabled, but Apache kept its previous running config."
 
 log_ok "HTTPS site created for ${hostname}."

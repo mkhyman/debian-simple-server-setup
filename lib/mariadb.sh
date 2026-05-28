@@ -7,19 +7,18 @@
 # scripts should own workflow and presentation decisions.
 ###############################################################################
 
-mariadb_validate_config() {
-    # MariaDB validation differs a little across releases. Prefer the explicit
-    # validator when present, and fall back to the server's config-parsing path.
-    if mariadbd --help --verbose 2>&1 | grep -q -- '--validate-config'; then
-        mariadbd --validate-config
-    else
-        mysqld --verbose --help
-    fi
+mariadb_socket_query() {
+    mariadb --protocol=socket "$@"
 }
 
 
-mariadb_restart_safely() {
-    mariadb_validate_config || return 1
-    svc_restart mariadb
+mariadb_get_variable_value() {
+    local variable_name="$1"
+
+    mariadb_socket_query -NBe "SHOW VARIABLES LIKE '${variable_name}';" | awk '{ print $2 }'
 }
 
+
+mariadb_require_secure_transport_enabled() {
+    [[ "$(mariadb_get_variable_value require_secure_transport)" == "ON" ]]
+}

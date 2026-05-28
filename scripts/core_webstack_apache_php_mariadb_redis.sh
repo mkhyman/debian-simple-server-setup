@@ -32,7 +32,7 @@ for php_version in "${PHP_VERSIONS[@]}"; do
         "php${php_version}-curl" "php${php_version}-zip" "php${php_version}-bcmath" \
         "php${php_version}-intl" "php${php_version}-gd" "php${php_version}-readline" \
         "php${php_version}-opcache" "php${php_version}-redis" || log_fail "Could not install PHP ${php_version} and required extensions. Later site creation for this PHP version will log_fail until this is fixed."
-    svc_enable_now "php${php_version}-fpm" || log_fail "Could not enable PHP-FPM ${php_version}. The packages may be installed, but the service is not ready for sites."
+    log_run svc_enable_now "php${php_version}-fpm" || log_fail "Could not enable PHP-FPM ${php_version}. The packages may be installed, but the service is not ready for sites."
 done
 
 if command -v "php${DEFAULT_PHP_VERSION}" >/dev/null 2>&1; then
@@ -47,8 +47,8 @@ a2dismod php8.4 php7.4 >>"${LOG_FILE}" 2>&1 || true
 
 # Validate before restart because Apache is shared infrastructure: one broken
 # module/vhost should not take every personal site offline.
-svc_enable_now apache2 || log_fail "Could not enable Apache. Web stack setup stopped before Apache restart validation."
-apache_restart_safely || log_fail "Apache config validation or restart failed. Apache may still be running with the previous configuration."
+log_run svc_enable_now apache2 || log_fail "Could not enable Apache. Web stack setup stopped before Apache restart validation."
+log_run apache_restart_safely || log_fail "Apache config validation or restart failed. Apache may still be running with the previous configuration."
 
 # MariaDB is allowed to listen remotely, so TLS is configured as part of the
 # service baseline rather than relying on every database user to remember it.
@@ -95,10 +95,35 @@ EOF
 
 file_write_managed "${MARIADB_REMOTE_SSL_CONFIG}" 0644 root:root "${tmp_mariadb}" || log_fail "Could not write MariaDB TLS config. MariaDB restart was not attempted."
 
-# MariaDB config is validated before restart for the same reason as Apache: a
-# bad generated snippet should log_fail safely before the daemon is disrupted.
-svc_enable_now mariadb || log_fail "Could not enable MariaDB. TLS config may be written, but service state was not changed."
-mariadb_restart_safely || log_fail "MariaDB config validation or restart failed. MariaDB may still be running with the previous configuration."
+# MariaDB does not have a reliable offline validator on this Debian/MariaDB
+# baseline while the service is already running. The meaningful test is whether
+# the real service restarts with the written config and accepts local admin
+# queries afterwards.
+log_info "Enabling MariaDB service."
+log_run svc_enable_now mariadb || log_fail "Could not enable MariaDB. TLS config may be written, but service state was not changed."
+
+log_info "Restarting MariaDB so TLS settings are applied."
+log_run svc_restart mariadb || log_fail "MariaDB restart failed after TLS configuration. Check the script log for service output."
+
+if svc_is_active mariadb; then
+    log_ok "MariaDB service is running."
+else
+    log_fail "MariaDB service is not active after restart."
+fi
+
+log_info "Checking MariaDB accepts local socket queries."
+log_run mariadb_socket_query -e "SELECT 1;" || log_fail "MariaDB did not accept a local socket query after restart."
+
+log_info "Checking MariaDB requires secure transport."
+if secure_transport_value="$(mariadb_get_variable_value require_secure_transport 2>>"${LOG_FILE}")"; then
+    if [[ "${secure_transport_value}" == "ON" ]]; then
+        log_ok "MariaDB require_secure_transport is ON."
+    else
+        log_fail "MariaDB require_secure_transport is ${secure_transport_value:-unset}; expected ON."
+    fi
+else
+    log_fail "Could not check MariaDB require_secure_transport. See log file: ${LOG_FILE}"
+fi
 
 # Redis is kept local-only because Laravel typically uses it as an application
 # dependency, not as a public network service.
@@ -109,8 +134,8 @@ sed -i -E "s/^bind .*/bind ${REDIS_BIND}/" /etc/redis/redis.conf \
 sed -i -E "s/^protected-mode .*/protected-mode yes/" /etc/redis/redis.conf \
     || log_fail "Could not enable Redis protected mode. Redis was not restarted."
 
-svc_enable_now redis-server || log_fail "Could not enable Redis. Redis config may have been edited, but service state was not changed."
-redis_restart_safely || log_fail "Could not restart Redis after local-only config update. Redis may still be running with previous settings."
+log_run svc_enable_now redis-server || log_fail "Could not enable Redis. Redis config may have been edited, but service state was not changed."
+log_run redis_restart_safely || log_fail "Could not restart Redis after local-only config update. Redis may still be running with previous settings."
 
 if ! cat >"${SERVER_ADMIN_MARIADB_DIR}/README.txt" <<EOF
 MariaDB TLS notes

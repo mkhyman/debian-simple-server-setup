@@ -83,8 +83,8 @@ file_write_managed /etc/fail2ban/jail.d/sshd.local 0644 root:root "${tmp_fail2ba
 
 # Restart after writing the managed jail so reruns converge on the desired
 # runtime state instead of merely changing files on disk.
-svc_enable_now fail2ban || log_fail "Could not enable fail2ban. SSH jail config was written, but the service was not started."
-svc_restart fail2ban || log_fail "Could not restart fail2ban after writing SSH jail config. Check the fail2ban log and generated jail file."
+log_run svc_enable_now fail2ban || log_fail "Could not enable fail2ban. SSH jail config was written, but the service was not started."
+log_run svc_restart fail2ban || log_fail "Could not restart fail2ban after writing SSH jail config. Check the fail2ban log and generated jail file."
 
 # Security updates are deliberately narrow and opt-in via config because this is
 # a personal hosting box, not an unattended general package-upgrade system.
@@ -116,7 +116,7 @@ EOF
     file_write_managed /etc/apt/apt.conf.d/51security-only-unattended-upgrades 0644 root:root "${tmp_security_upgrades}" \
         || log_fail "Could not write unattended-upgrades security-only config."
 
-    svc_enable_now unattended-upgrades || log_fail "Could not enable unattended-upgrades. Config files were written but the service state was not changed."
+    log_run svc_enable_now unattended-upgrades || log_fail "Could not enable unattended-upgrades. Config files were written but the service state was not changed."
 else
     log_info "Unattended security updates disabled by config."
 fi
